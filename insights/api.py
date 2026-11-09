@@ -41,6 +41,12 @@ def create_app(service=None):
         except ValueError as exc:return jsonify(status='UNAVAILABLE',error=str(exc),disclaimer=DISCLAIMER),400
         except Exception:return jsonify(status='UNAVAILABLE',error='Licensed Dhan data/entitlement unavailable; no trade inferred',disclaimer=DISCLAIMER),503
 
+    @app.post('/api/v1/market-insights/dashboard/refresh')
+    def refresh_dashboard():
+        # Local-only asynchronous historical data refresh. Never submits orders.
+        result=service.request_dashboard_refresh()
+        return jsonify(result),202 if result['status']=='STARTED' else (429 if result['status']=='RATE_LIMITED' else 409 if result['status']=='BUSY' else 503)
+
     @app.get('/api/v1/market-insights/track-record')
     def track_record():return jsonify(signals=service.journal.signals(),stats=service.journal.stats(),
          backtests=service.journal.backtests(),note='Open/research trades are not counted as wins. Only observed outcomes count.',disclaimer=DISCLAIMER)
