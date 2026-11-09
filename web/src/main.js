@@ -6,7 +6,7 @@ const e=React.createElement;
 const RISK='Rule-based analytics, not investment advice. Entries and targets are not guaranteed. Trading carries risk of loss. No orders are placed.';
 const tabs=[['Dashboard','▦'],['Analyse','⌕'],['Intraday','↗'],['BTST','◷'],['Index Options','⌁'],['F&O Stocks','≋'],['Track Record','▤']];
 const route={'Dashboard':'dashboard','Analyse':'analyse','Intraday':'intraday','BTST':'btst','Index Options':'index-options','F&O Stocks':'fo-stocks','Track Record':'track-record'};
-async function api(url){const res=await fetch(url,{headers:{Accept:'application/json'},cache:'no-store'});const body=await res.json();if(!res.ok)throw Error(body.error||`HTTP ${res.status}`);return body;}
+async function api(url,options={}){const res=await fetch(url,{...options,headers:{Accept:'application/json',...(options.headers||{})},cache:'no-store'});const body=await res.json();if(!res.ok)throw Error(body.error||`HTTP ${res.status}`);return body;}
 function Text({children,muted=false}){return e('span',{className:muted?'muted':''},children);}
 function Badge({children,type=''}){return e('span',{className:`badge ${type}`},children);}
 function Tile({title,value,sub,accent}){return e('div',{className:'tile'},e('div',{className:'kicker'},title),e('div',{className:'tile-value',style:{color:accent||'var(--ink)'}},value??'—'),e('div',{className:'small muted'},sub||''));}
@@ -59,11 +59,23 @@ function OiChart({strikes=[]}){
  },[strikes]);
  return e('div',null,e('div',{className:'legend'},e('span',null,'● Call OI'),e('span',null,'● Put OI'),e('small',{className:'muted'},'X axis: mapped strike levels')),e('div',{ref,className:'chart'}));
 }
-function Dashboard({data}){
+function Dashboard({data,onRefresh,refreshBusy,refreshState,refreshError}){
+ const asof=data.data_asof?new Date(data.data_asof).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',dateStyle:'medium',timeStyle:'short'}):'Not available';
+ const refreshed=data.updated_at?new Date(data.updated_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',dateStyle:'medium',timeStyle:'short'}):'Never';
+ const lastSession=data.session_date||'Unknown';
+ const mode=data.not_live?'Historical — NOT LIVE':data.data_asof?'Completed session candles':'Not loaded';
+
  const indices=data.indices||[],sectors=data.sectors||[];
  const find=(v)=>indices.find(x=>(x.symbol||'').toUpperCase().replace(/[^A-Z0-9]/g,'').includes(v));
  const nifty=find('NIFTY'),sensex=find('SENSEX');
  return e(React.Fragment,null,
+  e('div',{className:'manual-toolbar'},
+   e('div',null,e('strong',null,'Dhan market data'),e('p',{className:'muted small'},'Last completed candle: ',asof,' IST · Session: ',lastSession,' · Fetched: ',refreshed),
+      e('p',{className:'muted small'},'Mode: ',mode,' · Manual refresh fetches completed candles only, even after market close.')),
+   e('button',{type:'button',className:'refresh-btn',disabled:refreshBusy,onClick:onRefresh},refreshBusy?'Refreshing Dhan…':'↻ Refresh Market Data')),
+  refreshError?e(Notice,{warning:true},refreshError):null,
+  refreshState?.status==='NO_DATA'||refreshState?.status==='FAILED'?e(Notice,{warning:true},refreshState.message||'Market data unavailable.'):null,
+  data.not_live&&data.data_asof?e(Notice,{warning:true},'HISTORICAL SNAPSHOT — NOT LIVE. Bias and changes refer to the completed session dated '+lastSession+'. Do not use these as live entry signals.'):null,
   e('div',{className:'tile-grid'},e(Tile,{title:'NIFTY 50 BIAS',value:nifty?.bias||'Awaiting data',sub:nifty?.score!=null?`Rule score: ${nifty.score}`:'EMA / VWAP / ADX / structure'}),e(Tile,{title:'SENSEX BIAS',value:sensex?.bias||'Awaiting data',sub:sensex?.score!=null?`Rule score: ${sensex.score}`:'Missing inputs are not guessed'}),e(Tile,{title:'SECTORS AVAILABLE',value:sectors.length,sub:'Dhan sector indices'}),e(Tile,{title:'MARKET DATA',value:data.status||'No connection',sub:data.updated_at||'Not updated'})),
   e('div',{className:'split'},
    e(Section,{title:'Index bias & underlying rules'},indices.length?indices.map((x,i)=>e('div',{className:'bias',key:i},
@@ -99,9 +111,39 @@ function TrackRecord({data}){
 function App(){
  const [active,setActive]=useState('Dashboard');const [theme,setTheme]=useState(localStorage.getItem('bharat-theme')||'dark');
  const [health,setHealth]=useState({status:'Connecting…',read_only:true});const [data,setData]=useState({});const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+ const [refreshBusy,setRefreshBusy]=useState(false);const [refreshError,setRefreshError]=useState('');
  useEffect(()=>{document.documentElement.dataset.theme=theme;localStorage.setItem('bharat-theme',theme);},[theme]);
  useEffect(()=>{let alive=true;const load=async()=>{try{const h=await api('/api/v1/health');if(alive)setHealth(h);}catch{if(alive)setHealth({status:'OFFLINE',read_only:true});}};load();const id=setInterval(load,15000);return()=>{alive=false;clearInterval(id);};},[]);
  useEffect(()=>{if(active==='Analyse')return;let alive=true;const load=async()=>{try{const d=await api('/api/v1/market-insights/'+route[active]);if(alive){setData(d);setError('');}}catch(ex){if(alive)setError(ex.message);}};load();const id=setInterval(load,20000);return()=>{alive=false;clearInterval(id);};},[active]);
+ const onRefresh=async()=>{
+  if(refreshBusy)return;
+  setRefreshBusy(true);setRefreshError('');
+  try {
+   const result=await api('/api/v1/market-insights/dashboard/refresh',{method:'POST'});
+   if(result.status!=='STARTED')throw Error(result.error||'Unable to start refresh');
+  } catch(ex) {
+   setRefreshError(ex.message||'Dhan refresh failed');setRefreshBusy(false);
+  }
+ };
+ useEffect(()=>{
+  if(!refreshBusy)return;
+  let alive=true;
+  const poll=async()=>{
+   try {
+    const h=await api('/api/v1/health');
+    if(!alive)return;
+    setHealth(h);
+    const state=h.manual_refresh||{};
+    if(state.status==='RUNNING'||state.status==='IDLE')return;
+    setRefreshBusy(false);
+    if(state.status!=='SUCCEEDED')setRefreshError(state.message||state.status||'Refresh failed');
+    const d=await api('/api/v1/market-insights/dashboard');
+    if(alive&&active==='Dashboard')setData(d);
+   } catch(ex){if(alive){setRefreshBusy(false);setRefreshError(ex.message);}}
+  };
+  poll();const id=setInterval(poll,2500);
+  return()=>{alive=false;clearInterval(id);};
+ },[refreshBusy,active]);
  const onSearch=async(symbol,expiry)=>{setBusy(true);setError('');try{setData(await api('/api/v1/market-insights/analyse?symbol='+encodeURIComponent(symbol.trim())+(expiry?'&expiry='+encodeURIComponent(expiry):'')));}catch(ex){setData({});setError(ex.message);}finally{setBusy(false);}};
  const select=label=>{setActive(label);setError('');setData({});};
  return e('div',{className:'shell'},
@@ -114,7 +156,7 @@ function App(){
     e('div',{className:'top-actions'},e(Badge,{type:'positive'},'NO ORDER PLACEMENT'),e(Badge,null,'DHAN · '+health.status),e('button',{className:'theme-btn',onClick:()=>setTheme(theme==='dark'?'light':'dark')},theme==='dark'?'☀ Light':'☾ Dark'))),
    e('main',{className:'content'},e(Notice,{warning:true},RISK),
     error?e(Notice,{warning:true},error):null,
-    active==='Dashboard'?e(Dashboard,{data}):null,
+    active==='Dashboard'?e(Dashboard,{data,onRefresh,refreshBusy,refreshState:health.manual_refresh,refreshError}):null,
     active==='Analyse'?e(Analyse,{data,onSearch,busy}):null,
     ['Intraday','BTST','Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
      e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'Scheduled 10:00 IST':active==='BTST'?'Scheduled 15:00 IST':'Licensed Dhan market data'}),
