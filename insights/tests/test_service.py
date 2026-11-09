@@ -21,6 +21,38 @@ class FakeBroker:
   return pd.DataFrame(dict(open=[100,101,102],high=[102,105,106],low=[99,100,102],close=[101,104,105],volume=[500,500,500]),index=idx)
 
 class ServiceTests(unittest.TestCase):
+ def test_dashboard_uses_last_completed_historical_session(self):
+  with tempfile.TemporaryDirectory() as d:
+   service=InsightsService(FakeBroker(),d)
+   result=service.dashboard(datetime(2026,11,10,21,0,tzinfo=IST))
+   self.assertEqual(result['status'],'HISTORICAL SNAPSHOT — NOT LIVE')
+   self.assertEqual(result['session_date'],'2026-11-09')
+   self.assertTrue(result['not_live'])
+   self.assertEqual(result['source'],'DHAN COMPLETED CANDLES')
+   self.assertEqual(result['indices'][0]['session_date'],'2026-11-09')
+ def test_manual_refresh_runs_without_starting_orders(self):
+  with tempfile.TemporaryDirectory() as d:
+   service=InsightsService(FakeBroker(),d)
+   result=service.request_dashboard_refresh(datetime(2026,11,10,21,0,tzinfo=IST))
+   self.assertEqual(result['status'],'STARTED')
+   service._manual_thread.join(timeout=5)
+   self.assertFalse(service._manual_thread.is_alive())
+   health=service.health()
+   self.assertEqual(health['manual_refresh']['status'],'SUCCEEDED')
+   self.assertIn('dashboard',health['updated_at'])
+   self.assertEqual(service.request_dashboard_refresh()['status'],'RATE_LIMITED')
+   self.assertFalse(health['orders_enabled'])
+ def test_manual_refresh_endpoint_is_read_only(self):
+  with tempfile.TemporaryDirectory() as d:
+   from insights.api import create_app
+   service=InsightsService(FakeBroker(),d)
+   client=create_app(service).test_client()
+   response=client.post('/api/v1/market-insights/dashboard/refresh')
+   self.assertEqual(response.status_code,202)
+   service._manual_thread.join(timeout=5)
+   self.assertEqual(client.get('/api/v1/health').json['manual_refresh']['status'],'SUCCEEDED')
+   self.assertEqual(client.get('/api/v1/market-insights/dashboard').json['not_live'],True)
+   self.assertEqual(client.get('/api/v1/health').json['orders_enabled'],False)
  def test_health_has_no_token(self):
   with tempfile.TemporaryDirectory() as d:
    s=InsightsService(FakeBroker(),d)
