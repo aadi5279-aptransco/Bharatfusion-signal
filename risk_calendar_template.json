@@ -1,0 +1,9 @@
+{
+  "reviewed_by": "",
+  "reviewed_at": "",
+  "coverage_start": "",
+  "coverage_end": "",
+  "sources": ["https://www.rbi.org.in/", "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm", "https://www.nseindia.com/companies-listing/corporate-filings-board-meetings"],
+  "events": [],
+  "instructions": "Fill all timestamps with +05:30 timezone after genuinely reviewing RBI/FED, elections, Budget and company-results events. Add each event as {at: ISO timestamp, title: event title, symbol: ALL or NSE symbol, impact: HIGH, source: official URL}. Coverage must extend 4 days for BTST or 10 days for 125D. Reviewed_at must be within 24 hours. Do not clear events merely to enable a trade. This blank template does not pass."
+}
