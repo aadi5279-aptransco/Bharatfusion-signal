@@ -48,6 +48,9 @@ class InsightsService:
           'index-options':{'signals':[],'status':'WAITING FOR OPTION CHAIN'},
           'fo-stocks':{'signals':[],'status':'WAITING FOR FUTURES OI'}}
         self._done=set();self._thread=None;self._stop=threading.Event()
+        self._manual_requested_at=0.0
+        self._manual_thread=None
+        self._manual_refresh=dict(status='IDLE')
 
     def instruments(self):
         with self._lock:
@@ -77,33 +80,99 @@ class InsightsService:
     def health(self):
         with self._lock:return dict(status=('CONNECTED' if getattr(self.broker,'_last_ok',None) and time.monotonic()-self.broker._last_ok<600 else 'CONFIGURED — UNVERIFIED') if self.broker.configured() else 'NEEDS_DHAN_CONFIGURATION',
           source='DHAN',read_only=True,orders_enabled=False,updated_at=dict(self._timestamps),last_error=self._last_error,
-          holiday_calendar='CONFIGURED' if _holiday_set() is not None else 'NOT CONFIGURED — scans blocked',disclaimer=DISCLAIMER)
+          holiday_calendar='CONFIGURED' if _holiday_set() is not None else 'NOT CONFIGURED — scans blocked',
+          manual_refresh=dict(self._manual_refresh),disclaimer=DISCLAIMER)
 
     def dashboard(self,now):
+        """Snapshot the most recent *completed* Dhan session, not assumed live prices."""
+        now=now.astimezone(IST)
         items=[i for i in self.instruments() if i.get('kind') in ('index','sector')]
-        indices=[];sectors=[];changes={}
+        indices=[];sectors=[]
         for item in items:
             try:
                 f=self.broker.history(item,now,minutes=5)
-                today=f[f.index.date==now.date()]
-                if today.empty:continue
-                change=round((float(today.close.iloc[-1])/float(today.open.iloc[0])-1)*100,2)
-                changes[_norm(item['symbol'])]=change
+                # Defence in depth: never score a candle which hasn't finished yet.
+                f=f[f.index+pd.Timedelta(minutes=5)<=pd.Timestamp(now)]
+                if f.empty:continue
+                last=f.index[-1]
+                session=f[f.index.date==last.date()]
+                if session.empty:continue
+                change=round((float(session.close.iloc[-1])/float(session.open.iloc[0])-1)*100,2)
+                metadata=dict(session_change=change,session_date=last.date().isoformat(),
+                              asof=last.isoformat())
                 if item['kind']=='index':
-                    result=index_bias(f,item['symbol']);result['session_change']=change
+                    result=index_bias(f,item['symbol']);result.update(metadata)
                     indices.append(result)
                     if _norm(item['symbol']) in ('BANKNIFTY','NIFTYBANK'):
-                        sectors.append(dict(symbol=item['symbol'],sector='Bank',session_change=change))
-                else:sectors.append(dict(symbol=item['symbol'],sector=item.get('sector',item['symbol']),session_change=change))
+                        sectors.append(dict(symbol=item['symbol'],sector='Bank',**metadata))
+                else:
+                    sectors.append(dict(symbol=item['symbol'],sector=item.get('sector',item['symbol']),**metadata))
             except (BrokerUnavailable,ValueError,KeyError):continue
         nifty=next((x for x in indices if _norm(x['symbol']) in ('NIFTY','NIFTY50')),None)
         if nifty:
-            for s in sectors:s['relative_strength']=round(s['session_change']-nifty['session_change'],2)
+            for sector in sectors:
+                # Never compare returns from two different trading sessions.
+                if sector['session_date']==nifty['session_date']:
+                    sector['relative_strength']=round(sector['session_change']-nifty['session_change'],2)
         sectors.sort(key=lambda x:x.get('relative_strength',x['session_change']),reverse=True)
-        payload=dict(indices=indices,sectors=sectors,status='READY' if indices else 'NO VERIFIED INDEX DATA',
-                     coverage=dict(indices=len(indices),sectors=len(sectors)),vix='UNAVAILABLE',fii_dii='UNAVAILABLE')
+        reference=nifty or (max(indices,key=lambda x:x['asof']) if indices else None)
+        candle_at=pd.Timestamp(reference['asof']) if reference else None
+        age_minutes=(pd.Timestamp(now)-candle_at).total_seconds()/60 if candle_at is not None else None
+        not_live=(candle_at is None or candle_at.date()!=now.date()
+                  or not is_market_session(now,_holiday_set()) or age_minutes>15)
+        status=('HISTORICAL SNAPSHOT — NOT LIVE' if not_live else 'READY — SESSION DATA') if indices else 'NO VERIFIED INDEX DATA'
+        payload=dict(indices=indices,sectors=sectors,status=status,
+                     coverage=dict(indices=len(indices),sectors=len(sectors)),
+                     session_date=reference['session_date'] if reference else None,
+                     data_asof=reference['asof'] if reference else None,
+                     data_age_minutes=round(age_minutes,1) if age_minutes is not None else None,
+                     not_live=not_live,source='DHAN COMPLETED CANDLES',
+                     vix='UNAVAILABLE',fii_dii='UNAVAILABLE')
         self._update('dashboard',payload,now)
         return payload
+
+    def request_dashboard_refresh(self,now=None):
+        """Local read-only refresh; serialized with scheduled scans and rate limited."""
+        if not self.broker.configured():
+            return dict(status='UNAVAILABLE',error='Configure Dhan credentials first')
+        now=now or datetime.now(IST)
+        tick=time.monotonic()
+        with self._lock:
+            if self._manual_refresh.get('status')=='RUNNING':
+                return dict(status='BUSY',error='A manual refresh is already running')
+            if tick-self._manual_requested_at<45:
+                return dict(status='RATE_LIMITED',error='Please allow 45 seconds between refresh requests')
+            if not self._job_lock.acquire(blocking=False):
+                return dict(status='BUSY',error='Scheduled scan is running; retry when it finishes')
+            self._manual_requested_at=tick
+            requested_at=now.isoformat()
+            self._manual_refresh=dict(status='RUNNING',requested_at=requested_at)
+
+        def work():
+            state='SUCCEEDED';message='Completed Dhan market-data snapshot'
+            try:
+                result=self.dashboard(now)
+                if not result['indices']:
+                    state='NO_DATA'
+                    message='No verified completed index candles available from Dhan'
+            except (BrokerUnavailable,ValueError,KeyError) as exc:
+                state='FAILED';message=str(exc)[:160]
+            except Exception:
+                state='FAILED';message='Unexpected market-data refresh error; see server logs'
+            finally:
+                with self._lock:
+                    self._manual_refresh=dict(status=state,requested_at=requested_at,
+                                              completed_at=datetime.now(IST).isoformat(),
+                                              message=message)
+                    if state in ('FAILED','NO_DATA'):
+                        self._last_error='manual dashboard: '+message
+                    elif self._last_error.startswith('manual dashboard:'):
+                        self._last_error=''
+                self._job_lock.release()
+        self._manual_thread=threading.Thread(target=work,daemon=True,name='ManualDashboardRefresh')
+        self._manual_thread.start()
+        return dict(status='STARTED',requested_at=requested_at,
+                    note='Fetching completed Dhan candles; no orders will be placed')
 
     def _context(self):
         snap=self.snapshot('dashboard');indices=snap.get('indices',[])
