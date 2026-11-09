@@ -1,6 +1,7 @@
 """Dedicated signal journal. No fabricated outcomes, SQLite WAL for concurrent readers."""
 from __future__ import annotations
 import json, sqlite3, threading
+from contextlib import contextmanager
 from pathlib import Path
 
 _SCHEMA = '''
@@ -35,15 +36,27 @@ class Journal:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
-        with self._connect() as c:
+        with self._session() as c:
             c.executescript(_SCHEMA)
             # Add-only migration for pre-upgrade local journals.
             old={r[1] for r in c.execute('PRAGMA table_info(signals)')}
             for key in ('instrument_id','segment','instrument_type'):
                 if key not in old:c.execute(f'ALTER TABLE signals ADD COLUMN {key} TEXT')
 
-    def _connect(self):
-        return sqlite3.connect(str(self.path), timeout=20)
+    @contextmanager
+    def _session(self):
+        """Commit/rollback and ALWAYS close the handle (required on Windows).
+
+        sqlite3.Connection.__exit__ does not close a connection. An unclosed
+        connection keeps *.sqlite open and prevents TemporaryDirectory cleanup
+        on Windows (WinError 32), even if the transaction was committed.
+        """
+        connection = sqlite3.connect(str(self.path), timeout=20)
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def record(self, signal):
         """Called only for complete, deterministic, market-sourced signals."""
@@ -57,18 +70,18 @@ class Journal:
         if not sign*(sl-entry)<0 or not 0<sign*(t1-entry)<=sign*(t2-entry): raise ValueError('Invalid level order')
         if not isinstance(signal['reasons'], list) or not signal['reasons']: raise ValueError('Reasons must follow rules')
         key='|'.join(str(signal[n]) for n in ('strategy','version','symbol','direction','signal_at'))
-        with self.lock, self._connect() as c:
+        with self.lock, self._session() as c:
             c.execute('''INSERT OR IGNORE INTO signals(signal_key,strategy,version,symbol,direction,signal_at,entry,t1,t2,sl,rr,confidence,reasons,backtest_status,instrument_id,segment,instrument_type)
                          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', (key,signal['strategy'],signal['version'],signal['symbol'],d,signal['signal_at'],entry,t1,t2,sl,float(signal['rr']),float(signal['confidence']),json.dumps(signal['reasons']),signal.get('backtest_status','UNVALIDATED'),str(signal.get('instrument_id','')) or None,signal.get('segment'),signal.get('instrument_type')))
         return key
 
     def pending(self,limit=30):
-        with self.lock,self._connect() as c:
+        with self.lock, self._session() as c:
             c.row_factory=sqlite3.Row
             return [dict(x) for x in c.execute("SELECT * FROM signals WHERE status='OPEN' AND instrument_id IS NOT NULL ORDER BY signal_at ASC LIMIT ?", (limit,))]
 
     def signals(self, limit=100):
-        with self.lock, self._connect() as c:
+        with self.lock, self._session() as c:
             c.row_factory=sqlite3.Row
             rows=[dict(x) for x in c.execute('SELECT * FROM signals ORDER BY signal_at DESC LIMIT ?', (min(500,max(1,int(limit))),))]
         for r in rows:r['reasons']=json.loads(r['reasons'])
@@ -77,13 +90,13 @@ class Journal:
     def outcome(self, signal_id, outcome, outcome_at, exit_price, costs=0):
         """One-way, evidence-backed outcome update. Never overwrite a closed result."""
         if outcome not in ('T1','T2','SL','EXPIRED'): raise ValueError('Invalid outcome')
-        with self.lock, self._connect() as c:
+        with self.lock, self._session() as c:
             cur=c.execute("UPDATE signals SET status=?,outcome_at=?,exit_price=?,costs=? WHERE id=? AND status='OPEN'",
                 (outcome,outcome_at,float(exit_price),float(costs),int(signal_id)))
             return cur.rowcount==1
 
     def stats(self):
-        with self.lock,self._connect() as c:
+        with self.lock, self._session() as c:
             c.row_factory=sqlite3.Row
             rows=[dict(r) for r in c.execute('''SELECT strategy,COUNT(*) total, SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) open_count,
              SUM(CASE WHEN status IN ('T1','T2') THEN 1 ELSE 0 END) wins,
@@ -97,10 +110,10 @@ class Journal:
 
     def save_backtest(self, result):
         names=('strategy','version','tested_at','samples','win_rate','profit_factor','drawdown_pct','avg_r','net_r','eligible','notes')
-        with self.lock,self._connect() as c:
+        with self.lock, self._session() as c:
             c.execute('REPLACE INTO backtests VALUES ('+','.join('?' for _ in names)+')', tuple(result.get(k) for k in names))
 
     def backtests(self):
-        with self.lock,self._connect() as c:
+        with self.lock, self._session() as c:
             c.row_factory=sqlite3.Row
             return [dict(x) for x in c.execute('SELECT * FROM backtests ORDER BY strategy')]
