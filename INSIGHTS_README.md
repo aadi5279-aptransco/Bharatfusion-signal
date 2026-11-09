@@ -1,0 +1,52 @@
+# BharatSignal Fusion — Market Insights (additive research edition)
+
+**Status:** Locally runnable Flask + React research UI, **not** an OpenAlgo code fork. All original Tkinter files remain intact; use `START.bat` for the legacy desktop UI or `START_INSIGHTS.bat` for the new web UI. No OpenAlgo source was copied. Vendored Kronos files retain their upstream attribution/license.
+
+## First-time Windows setup
+
+1. Install **Python 3.11** and **Node.js LTS**. Unzip the delivered archive into a new folder (do not overwrite your original installation).
+2. Run `INSTALL_INSIGHTS.bat`. This creates `.venv`, installs the official `dhanhq` library, builds React locally, and runs the old and new test suites. Internet access is required for initial package installation.
+3. Open `.env` (created from `.env.example`) and set `DHAN_CLIENT_ID` and `DHAN_ACCESS_TOKEN`. Do **not** paste these into GitHub. `.env` is intentionally gitignored. Note that a plain `.env` file is **not encrypted at rest**: restrict Windows user permissions and use OS credential storage if encrypted secret persistence is required. Credentials are never exposed to React.
+4. Obtain and validate a current **exchange holiday calendar** yourself, copy `insights_holidays.example.json` to a local file, populate verified holiday dates (including any special market holidays), and set `INSIGHTS_HOLIDAY_FILE` to its full path. Without this, scheduled scans are blocked. Check exchange notices for special sessions as well; ordinary market hours are assumed.
+5. For relative-strength intraday scans, verify and edit `insights_sector_map.example.json`, then set `INSIGHTS_SECTOR_MAP_FILE` in `.env` to its full path. Only symbols represented in the official Dhan instrument master are scanned.
+6. Optional: provide **licensed, dated** delivery data for BTST via `INSIGHTS_LICENSED_DELIVERY_FILE` referencing JSON of the form `{"date":"YYYY-MM-DD","values":{"SYMBOL":48.2}}`; also needs 20 prior completed sessions' matched-time intraday volume, obtained from Dhan. No delivery data is scraped.
+7. Run `START_INSIGHTS.bat`, then open **http://127.0.0.1:8765**. Keep the console running. The Flask API binds only to `127.0.0.1`.
+
+The UI polls `/api/v1` for cached results. Scheduled scans run at/after **09:20**, **10:00**, **15:00** IST, plus dashboard refresh on five-minute clock boundaries, only within configured trading sessions. Scans may finish late if Dhan is slow; no jobs overlap. The UI shows last refresh and unavailable states. Automatic scan operation requires a running PC with internet and valid Dhan entitlements.
+
+## Tabs
+
+- **Dashboard:** NIFTY/SENSEX rule score: EMA20/50/200, ADX, VWAP and 20-candle structure. India VIX and FII/DII are explicitly unavailable unless separately licensed. Sector change and strength relative to NIFTY, computed from Dhan sector-index candles.
+- **Analyse:** Search by exact Dhan-mapped symbol, or `NIFTY 25000 CE`. Select expiry (optional). PCR, max pain, OI support/resistance, OI changes and strike OI chart derive from the licensed Dhan option-chain response. Historical IV percentile is unavailable without stored IV history. Option premium plan is a **research scenario**, with quote-age warnings.
+- **Intraday:** Scheduled at 10:00 IST, 5-minute ORB + VWAP + relative volume + ADX + NIFTY and sector strength. Requires sector map and completed candles. Outputs underlying cash entry, stop, T1, T2. Backtest unvalidated means **research only**.
+- **BTST:** Scheduled at 15:00 IST. No signal if licensed delivery %, prior 20-session matched-time 15:00 volume, or sector history is absent.
+- **Index Options:** NIFTY, BANKNIFTY, SENSEX CE/PE determined from index direction and OI. Premium levels are hypothetical until premium history and freshness are validated; expiry-day/high-IV warnings are shown. NSE and BSE indices require correctly mapped Dhan security IDs and segments.
+- **F&O Stocks:** Futures price/OI buildup and real option-chain premium scenario; blocks if futures OI is missing. **No invented option premium**.
+- **Track Record:** Immutable SQLite signal observations with separate observed T1/SL/expiry statuses. A bar touching both SL and T1 is counted as SL (conservative). Not executed fills. The observed win rate does not claim trading profitability.
+
+## Backend APIs
+
+`GET /api/v1/health`, `GET /api/v1/market-insights/dashboard`, `/intraday`, `/btst`, `/index-options`, `/fo-stocks`, `/analyse?symbol=NIFTY`, `/track-record`, `/backtests`, `/status`.
+
+No API accepts order-placement requests. `ENABLE_ORDER_PLACEMENT=true` causes startup to **fail closed**. This app does not contain broker order functions.
+
+## Validation
+
+`python -m unittest discover -s tests -v`
+
+`python -m unittest discover -s insights/tests -v`
+
+For a preliminary historical Dhan replay: `python -m insights.validate --strategy intraday --symbol RELIANCE --sector Energy`. This is **not a production-ready walk-forward backtest**; its results are explicitly marked ineligible pending point-in-time out-of-sample evaluation. BTST and options remain disabled until licensed historical data exists. Missing/expired credentials or holiday coverage cause visible no-data states, not fake signals.
+
+## Adding a strategy
+
+Create `insights/strategies/my_strategy.py` with a stable `NAME`, `VERSION`, and a **pure** function accepting completed Dhan candles and time-aware context. Return `None` when inputs/gates are missing; otherwise return a dict with `strategy, version, symbol, direction, signal_at, entry, sl, t1, t2, rr, confidence, reasons`. Levels must derive from deterministic rules. Add unit tests, validate historical price/option data, update the service scheduler, persist through `Journal.record`, and keep the output research-only until independent backtest passes.
+
+## Security and limitations
+
+- Do **not** commit `.env`, passwords, CSV exports, credentials or databases.
+- Token renewal is attempted only for active, eligible Dhan-Web tokens when `DHAN_WEB_GENERATED_TOKEN=true`. Other cases require manual secure reauthentication. Refresh tokens remain in memory only. <https://dhanhq.co/docs/v2/authentication/>
+- Option chains are globally throttled to **one request per 3.1 seconds** and cached; this is stricter than Dhan's documented unique-request limit. <https://dhanhq.co/docs/v2/option-chain/>
+- The new API uses Dhan only. The legacy app still contains historical workflows involving external public pages and risk reports; those original code paths are not rewritten or silently enabled in this new service.
+- The React app uses `lightweight-charts` for OI strike charts. A premium/candlestick price chart requires separately licensed time-series OHLC and is not depicted without it.
+- This is a research release, **not yet authenticated against your Dhan account or tested visually on Windows**. No claim of profitability, win rate or guaranteed scan timing is made.

@@ -1,0 +1,50 @@
+{
+  "version": "0.8.0-research",
+  "release_date": "2026-11-09",
+  "original_files_verified_unchanged": 56,
+  "new_files": {
+    ".env.example": "ecab5e097a50abf5e795d964f3aa1b3919dc4115555ea957c114f1737453b845",
+    ".gitignore": "903f2d43b2dd7ba56be58e67d0328a53a9ffe1dd3d00a7e31483bf75e427ac8f",
+    "AUDIT_INSIGHTS.md": "14f3a50dc814389373f603d68dc3542e28627eb304ba7523240f91a13e733fb6",
+    "INSIGHTS_README.md": "7b4de7cda1bc44b58109a1fdae0d2f10477269b6b89aff9f60cafd59b77c4945",
+    "INSTALL_INSIGHTS.bat": "b2f1a1c717ba73baf8395e98590fde7107cb72b88535357d83c97ece91f776aa",
+    "START_INSIGHTS.bat": "879517d41a631e1ad0856a97df88954d2448fa050748989afab15b2c2985a248",
+    "insights/__init__.py": "9f79f5f7f8e45d755fa53d293a3f68cf3dc66436f33d8da0dcb9a8f15c326464",
+    "insights/api.py": "aff3174bc0b37690f4017d4279a8a53c8e18412850485240e7a8acc153f36a19",
+    "insights/backtest.py": "53dc2846d5a2b455fc3b711c356f4c3e8bf0edc1db94d09928d048423d6951a6",
+    "insights/brokers/__init__.py": "bd0d3df48531cd913e7df84f5c25c3a961f9b5a6f468db1551c1a3ace4919e8d",
+    "insights/brokers/base.py": "5f7fe4bf5f345daaea07338d44e7afd828f0a21bb49194f99926b2ffb3d8f9b2",
+    "insights/brokers/dhan.py": "0e9771dfc0abed009c955541ea389c785b053764b1502ba309c3163a57718c4b",
+    "insights/brokers/streaming.py": "1eaa4dfda94757e92b91af3bba651632d60f5fb75075219b24086194ab8dd4da",
+    "insights/config.py": "c4644c038284ba9bfa616d4b937dc8b2e033937400cfc5facb6de21668e463b5",
+    "insights/db.py": "974ca7de43efd13c328163a7c206b005142da1b7db749889cd4e4b4951d0828f",
+    "insights/indicators.py": "dc6ffaaf8eba1f829e68b21bc83157af437cb95b9a35fd0ba16d7492fc2724de",
+    "insights/service.py": "62f8acf0a8867b8f4a67ab643eece81f53cacabe849c87cb26f2d76df25cadb5",
+    "insights/strategies/__init__.py": "9a86833b1d07d7a7d6970c1d72e19cd758f664e102eee3ea203efde2f36471f6",
+    "insights/strategies/equity.py": "e0057d883587a3349ef600e1f350a8f3ee6a7abfd53083865aec3b7934b71198",
+    "insights/strategies/futures.py": "7665ffa64d16ab224f60e3ff55e6624969692fc091d01ca4ff9163b79426f712",
+    "insights/strategies/options.py": "497eb386cd3b1d23a63c7bc4e2a7be3ccd14791e64cc887dcd8a8d75b37e4903",
+    "insights/tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "insights/tests/test_market_insights.py": "9a17f7175f919797a9e9a13fb57cacad6e201867a0a985298f98a8d35190df63",
+    "insights/tests/test_service.py": "feb85af922c0c365309e2c3120c38c5e362ff84333d9389e10256b3fee5d7692",
+    "insights/validate.py": "d7c67b6a26440eece96753ea18215842913cfaa9c72a725147274a978c813345",
+    "insights_holidays.example.json": "e7f88797eb39267232bb6170b7af66460989b2bee02b5dccea74763092f7b2a2",
+    "insights_sector_map.example.json": "74f8fd723a9f807acbee3dcddc470c20e09db1ae260756515dfbbd0bcbec2b47",
+    "requirements-insights.txt": "7b5f8aaf78479b7b689c5e072377b20e0752af242a67fa86f21da4dcc5af26e4",
+    "run_insights.py": "7a3179752fadb02030d53be9eeeccbceda5cc4b532d08294f9c751255b7fe971",
+    "web/index.html": "7aadbd84458d74eca850fa553c6955e8ae10d3a24cce26916ee0c61ee308765b",
+    "web/package.json": "15c37820f1245c73fc2a5ed1c90e9ffaeea312ebdf94465803a828a8b66283ca",
+    "web/src/main.js": "ab8d0b31b406f747a2ba58798dc920697c955e8e860f01d8619b09a799522e9d",
+    "web/src/styles.css": "53dcfa310e98ac17cdce272ee9c36666131551614c288f7faf3c4c6fbd5d3482",
+    "web/vite.config.js": "055484ba9ad9d4d04f8b648a2824e7d3e850d242b166821defa4a6b13bad57c5"
+  },
+  "tests": {
+    "legacy": 181,
+    "market_insights": 21
+  },
+  "runtime_validation": {
+    "flask": "not runnable in current sandbox",
+    "react_build": "npm package fetch not available",
+    "dhan_live": "requires user account"
+  }
+}

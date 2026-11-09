@@ -1,0 +1,5 @@
+{
+  "year": 2026,
+  "holidays": [],
+  "readme": "EXAMPLE ONLY. Supply all actual 2026 NSE+BSE market holidays after checking the official trading calendar. Without an explicitly configured and verified calendar, scheduled scans remain disabled."
+}
