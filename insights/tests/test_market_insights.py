@@ -1,4 +1,5 @@
-import unittest, tempfile, math
+import unittest, tempfile, math, sqlite3
+from unittest.mock import patch
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -24,6 +25,29 @@ def chain():
     return {'last_price':100,'oc':{'90':{'ce':{'oi':80,'previous_oi':50},'pe':{'oi':240,'previous_oi':100}},'100':{'ce':{'oi':100,'previous_oi':90,'top_ask_price':10,'top_bid_price':9.9,'volume':1000,'security_id':'1','implied_volatility':15},'pe':{'oi':160,'previous_oi':130,'top_ask_price':9,'top_bid_price':8.9,'volume':1000,'security_id':'2'}},'110':{'ce':{'oi':140,'previous_oi':120},'pe':{'oi':260,'previous_oi':210}}}}
 
 class TestJournal(unittest.TestCase):
+ def test_sqlite_connections_close_before_temporary_cleanup(self):
+  # sqlite3.Connection.__exit__ commits but does not close on Windows.
+  class TrackedConnection(sqlite3.Connection):
+   opened = 0
+   closed = 0
+   def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    type(self).opened += 1
+   def close(self):
+    type(self).closed += 1
+    super().close()
+  original_connect = sqlite3.connect
+  def tracked_connect(*args, **kwargs):
+   return original_connect(*args, factory=TrackedConnection, **kwargs)
+  with tempfile.TemporaryDirectory() as folder:
+   with patch('insights.db.sqlite3.connect', side_effect=tracked_connect):
+    journal = Journal(Path(folder)/'connections.sqlite')
+    journal.signals()
+    journal.pending()
+    journal.stats()
+    journal.backtests()
+  self.assertGreater(TrackedConnection.opened, 0)
+  self.assertEqual(TrackedConnection.opened, TrackedConnection.closed)
  def test_dedupe_outcomes_real_stats(self):
   with tempfile.TemporaryDirectory() as folder:
    d=Journal(Path(folder)/'test.sqlite')
