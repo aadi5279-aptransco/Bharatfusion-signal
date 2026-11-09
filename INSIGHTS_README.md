@@ -14,6 +14,37 @@
 
 The UI polls `/api/v1` for cached results. Scheduled scans run at/after **09:20**, **10:00**, **15:00** IST, plus dashboard refresh on five-minute clock boundaries, only within configured trading sessions. Scans may finish late if Dhan is slow; no jobs overlap. The UI shows last refresh and unavailable states. Automatic scan operation requires a running PC with internet and valid Dhan entitlements.
 
+## Manual market-data refresh (November 2026 update)
+
+The Dashboard has a **Refresh Market Data** action. Clicking it submits a local-only
+`POST /api/v1/market-insights/dashboard/refresh` request and returns immediately.
+The background worker fetches completed Dhan 5-minute candles for the mapped index and
+sector symbols. It will use the latest Dhan trading session if the market is closed.
+The UI displays **HISTORICAL SNAPSHOT — NOT LIVE**, the source session date, the
+last completed candle timestamp in IST, and the time of the fetch. It never invents
+intraday data or treats historical bias as a live entry signal.
+
+The request is restricted to the local Flask server (127.0.0.1), serialized with
+other scheduled scans, and accepts at most one request per 45 seconds. A refresh does
+not run strategy scans, record paper trades, or place orders. Dhan data entitlement
+and a valid unexpired token are still required. A backend health check exposes
+`manual_refresh.status` and errors without leaking credentials. API responses
+may remain stale if Dhan data is unavailable or a symbol is unsupported.
+
+To upgrade an already installed Windows copy while preserving local credentials:
+1. Stop `START_INSIGHTS.bat` with Ctrl+C and back up the local project.
+2. Download this development branch from GitHub and extract it into a separate folder.
+3. Copy only these files from the extracted tree into the matching paths of your installed
+   project: `insights/service.py`, `insights/api.py`, `insights/tests/test_service.py`,
+   `web/src/main.js`, and `web/src/styles.css`.
+4. From the installed project folder, run:
+   `cd web && npm run build && cd ..`
+   followed by
+   `.venv\\Scripts\\python.exe -m unittest discover -s insights\\tests -v`.
+5. Run `START_INSIGHTS.bat` and check the Dashboard.
+Never overwrite `.env`, `insights_holidays.json`, your local sector map,
+or any local database when applying an update.
+
 ## Tabs
 
 - **Dashboard:** NIFTY/SENSEX rule score: EMA20/50/200, ADX, VWAP and 20-candle structure. India VIX and FII/DII are explicitly unavailable unless separately licensed. Sector change and strength relative to NIFTY, computed from Dhan sector-index candles.
