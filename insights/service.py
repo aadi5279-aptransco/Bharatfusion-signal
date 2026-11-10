@@ -10,6 +10,7 @@ from insights.db import Journal
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
+from insights.scanner_quality import recent_frame,recent_context
 
 DISCLAIMER='Rule-based research, not investment advice. Signals are not guaranteed; trading can cause significant losses. No orders are placed.'
 
@@ -66,7 +67,17 @@ class InsightsService:
 
     def _stock_list(self):
         all_items=[x for x in self.instruments() if x.get('kind')=='stock']
-        if WATCHLIST:all_items=[x for x in all_items if _norm(x['symbol']) in {_norm(n) for n in WATCHLIST} or _norm(x.get('ticker','')) in {_norm(n) for n in WATCHLIST}]
+        if WATCHLIST:
+            selected={_norm(n) for n in WATCHLIST}
+            all_items=[x for x in all_items if _norm(x['symbol']) in selected or _norm(x.get('ticker','')) in selected]
+        else:
+            # The default universe must include mapped-sector stocks first.
+            # Do not pretend an alphabetical first-30 sample covers all F&O.
+            mapped=_sector_map()
+            all_items.sort(key=lambda x:(
+                _norm(x['symbol']) not in mapped and _norm(x.get('ticker','')) not in mapped,
+                _norm(x['symbol'])
+            ))
         return all_items[:MAX_SYMBOLS]
 
     def _update(self,name,payload,now):
@@ -181,34 +192,55 @@ class InsightsService:
         return nifty,sec
 
     def scan_intraday(self,now):
-        nifty,sectors=self._context();mapping=_sector_map();picks=[];unavailable=0;missing_sector=0;rules_not_met=0;data_assessed=0
-        for item in self._stock_list():
-            sec=sectors.get(mapping.get(_norm(item['symbol']),mapping.get(_norm(item.get('ticker','')),'')))
+        """Live-session candidates only; no historical or incomplete-bar signals."""
+        now=now.astimezone(IST)
+        nifty,sectors=self._context()
+        mapping=_sector_map()
+        stocks=self._stock_list()
+        candidates=[]
+        stats=dict(scanned=len(stocks),data_assessed=0,unavailable_count=0,
+                   stale_data=0,missing_sector=0,rules_not_met=0)
+        context_ok=recent_context(nifty,now)
+        if not context_ok:
+            data=dict(signals=[],status='NO VERIFIED CURRENT-SESSION NIFTY CONTEXT',
+                      **stats,note='No scan until NIFTY candles are fresh and completed.')
+            self._update('intraday',data,now)
+            return data
+        for item in stocks:
+            sector_name=mapping.get(_norm(item['symbol']),mapping.get(_norm(item.get('ticker','')),''))
+            sec=sectors.get(sector_name)
+            if not sec or not recent_context(sec,now):
+                stats['missing_sector']+=1
+                continue
             try:
-                if not nifty or nifty['bias']=='UNAVAILABLE' or nifty.get('session_date')!=now.date().isoformat():continue
-                if not sec:
-                    missing_sector+=1
-                    continue
                 bars=self.broker.history(item,now,minutes=5)
-                if len(bars)<201 or not any(bars.index.date==now.date()):
-                    unavailable+=1
+                if not recent_frame(bars,now,5,20):
+                    stats['stale_data']+=1
                     continue
-                data_assessed+=1
-                s=equity.intraday(bars,item['symbol'],now,nifty['session_change'],sec['session_change'])
-                if s is None:rules_not_met+=1
-                if s:
-                    s.update(backtest_status='UNVALIDATED',instrument_id=item['id'],segment=item['segment'],instrument_type=item['instrument']);self.journal.record(s);picks.append(s)
-            except (BrokerUnavailable,ValueError):unavailable+=1
-        picks.sort(key=lambda x:x['confidence'],reverse=True)
-        checked=len(self._stock_list())
-        status=('RESEARCH ONLY — BACKTEST VALIDATION REQUIRED' if picks else
-                'NO QUALIFYING RULE-BASED CANDIDATES' if data_assessed else
-                'NO VERIFIED NIFTY/SECTOR CONTEXT' if not nifty or nifty['bias']=='UNAVAILABLE' or nifty.get('session_date')!=now.date().isoformat() or missing_sector else
-                'NO VERIFIED DATA FOR CANDIDATE RULES')
-        data=dict(signals=picks[:10],status=status,unavailable_count=unavailable,
-                  scanned=checked,data_assessed=data_assessed,
-                  missing_sector=missing_sector,rules_not_met=rules_not_met,
-                  note='Zero candidates does not mean zero scanned. Unvalidated strategies remain research only.')
+                if len(bars)<201:
+                    stats['unavailable_count']+=1
+                    continue
+                stats['data_assessed']+=1
+                signal=equity.intraday(bars,item['symbol'],now,nifty['session_change'],sec['session_change'])
+                if signal is None:
+                    stats['rules_not_met']+=1
+                    continue
+                signal.update(backtest_status='UNVALIDATED',instrument_id=item['id'],
+                              segment=item['segment'],instrument_type=item['instrument'],
+                              data_asof=bars.index[-1].isoformat(),
+                              quote_freshness='CURRENT COMPLETED CASH CANDLE')
+                self.journal.record(signal)
+                candidates.append(signal)
+            except (BrokerUnavailable,ValueError,KeyError,TypeError):
+                stats['unavailable_count']+=1
+        candidates.sort(key=lambda x:x['confidence'],reverse=True)
+        status=('RESEARCH ONLY — BACKTEST VALIDATION REQUIRED' if candidates
+                else 'NO QUALIFYING RULE-BASED CANDIDATES' if stats['data_assessed']
+                else 'SCANNED — SECTOR HISTORY MISSING/STALE' if stats['missing_sector']
+                else 'SCANNED — STOCK CANDLES MISSING/STALE')
+        data=dict(signals=candidates[:10],status=status,**stats,
+                  qualified=len(candidates),
+                  note='Cash-side research candidates only; no execution and no guarantee.')
         self._update('intraday',data,now)
         return data
 
