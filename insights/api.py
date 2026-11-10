@@ -47,6 +47,11 @@ def create_app(service=None):
         result=service.request_dashboard_refresh()
         return jsonify(result),202 if result['status']=='STARTED' else (429 if result['status']=='RATE_LIMITED' else 409 if result['status']=='BUSY' else 503)
 
+    @app.get('/api/v1/market-insights/readiness')
+    def scanner_readiness():
+        from insights.diagnostics import report
+        return jsonify(report(service))
+
     @app.get('/api/v1/market-insights/track-record')
     def track_record():return jsonify(signals=service.journal.signals(),stats=service.journal.stats(),
          backtests=service.journal.backtests(),note='Open/research trades are not counted as wins. Only observed outcomes count.',disclaimer=DISCLAIMER)
