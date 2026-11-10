@@ -57,6 +57,6 @@ class ScannerReadinessTests(unittest.TestCase):
    r=service.scan_intraday(datetime(2026,11,11,10,5,tzinfo=IST))
    self.assertEqual(r['data_assessed'],0)
    self.assertEqual(r['signals'],[])
-   self.assertIn('NO VERIFIED NIFTY/SECTOR',r['status'])
+   self.assertIn('NO VERIFIED CURRENT-SESSION NIFTY CONTEXT',r['status'])
 
 if __name__=='__main__':unittest.main()
