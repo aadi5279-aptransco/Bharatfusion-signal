@@ -44,7 +44,7 @@ class InsightsService:
         self._lock=threading.RLock();self._job_lock=threading.Lock()
         self._instruments=[];self._last_error='';self._timestamps={};self._snapshots={
           'dashboard':{'indices':[],'sectors':[],'status':'WAITING FOR DATA'},
-          'intraday':{'signals':[],'status':'WAITING FOR 10:00 IST SCAN'},
+          'intraday':{'signals':[],'status':'WAITING FOR 10:15 IST SCAN'},
           'btst':{'signals':[],'status':'WAITING FOR 15:00 IST SCAN'},
           'index-options':{'signals':[],'status':'WAITING FOR OPTION CHAIN'},
           'fo-stocks':{'signals':[],'status':'WAITING FOR FUTURES OI'}}
