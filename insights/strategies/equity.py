@@ -11,13 +11,13 @@ BTST_VERSION='1.0'
 
 
 def intraday(frame,symbol,now,index_return=None,sector_return=None):
-    """Run only after 10:00 on *completed* five-minute Dhan candles."""
+    """Run only after 10:15 (four completed 15-minute intervals) on finished five-minute Dhan candles."""
     now=pd.Timestamp(now)
     if now.tzinfo is None:raise ValueError('Timezone-aware asof required')
-    if (now.hour,now.minute)<(10,0):return None
+    if (now.hour,now.minute)<(10,15):return None
     f=add_features(frame)
     today=f[f.index.date==now.date()]
-    if len(today)<9:return None
+    if len(today)<12:return None
     first=today.iloc[:3];last=today.iloc[-1]
     o=float(first.open.iloc[0]);close=float(last.close)
     if index_return is None or sector_return is None:return None
