@@ -45,11 +45,35 @@ To upgrade an already installed Windows copy while preserving local credentials:
 Never overwrite `.env`, `insights_holidays.json`, your local sector map,
 or any local database when applying an update.
 
+## Live Scanner Reliability Stage — 11 November 2026
+
+Development update on the existing additive, read-only Market Insights module:
+- The default 30-stock selection prioritizes names in the user-verified sector map; otherwise the old alphabetical first 30 provided little coverage. A manually specified watchlist retains its explicit order.
+- Intraday is gated to 10:15 IST (four complete 15-minute intervals); all its underlying and NIFTY/sector five-minute candles must belong to the current session and be completed and sufficiently recent. No stale/holiday setups.
+- F&O futures OI analysis requires a recent completed current-session 15-minute candle.
+- Index Options use the current-session, recent index context. Unverified premium quotes remain **hypothetical research** and are no longer written to the observed-trade journal.
+- Scan result counts distinguish data assessed, missing/stale sectors, stale cash candles, missing Dhan inputs, and candidates failing rules.
+- The user-facing cards explicitly call out freshness and option premium restrictions. Dhan credentials, order placement disabled, holiday calendars, original UI, and SQLite records are retained.
+
+**IMPORTANT: The absence of a fresh Dhan option-chain quote timestamp means option levels cannot be treated as executable.** This stage does not independently backtest strategy returns or validate option quotes; live tests remain necessary. The Dhan option adapter's nested response fix is a prerequisite.
+
+Windows update (existing installation; no Git required):
+1. Stop START_INSIGHTS.bat with Ctrl+C.
+2. Back up the *entire existing installation folder*, including any local-only settings and snapshots.
+3. From GitHub download the feature/market-insights-web-20261109 branch ZIP; extract into Downloads as a *separate source folder*.
+4. Copy ONLY: insights/scanner_quality.py, insights/service.py, insights/strategies/equity.py, insights/tests/test_scanner_quality.py, insights/tests/test_diagnostics.py, web/src/main.js, web/src/styles.css into corresponding installed application subfolders.
+5. In the installed application root: .venv\\Scripts\\python.exe -m unittest discover -s tests -q
+6. Then: .venv\\Scripts\\python.exe -m unittest discover -s insights\\tests -q
+7. Then: cd web && npm run build && cd ..
+8. START_INSIGHTS.bat; check /api/v1/health, /api/v1/market-insights/intraday, /index-options and /fo-stocks after 10:15 IST on an exchange-open day.
+
+If a test/build fails, do not continue to live testing. Restore from backup or investigate the failure. Never copy downloaded .env example over the live .env; never share tokens. No automatic order placement occurs.
+
 ## Tabs
 
 - **Dashboard:** NIFTY/SENSEX rule score: EMA20/50/200, ADX, VWAP and 20-candle structure. India VIX and FII/DII are explicitly unavailable unless separately licensed. Sector change and strength relative to NIFTY, computed from Dhan sector-index candles.
 - **Analyse:** Search by exact Dhan-mapped symbol, or `NIFTY 25000 CE`. Select expiry (optional). PCR, max pain, OI support/resistance, OI changes and strike OI chart derive from the licensed Dhan option-chain response. Historical IV percentile is unavailable without stored IV history. Option premium plan is a **research scenario**, with quote-age warnings.
-- **Intraday:** Scheduled at 10:00 IST, 5-minute ORB + VWAP + relative volume + ADX + NIFTY and sector strength. Requires sector map and completed candles. Outputs underlying cash entry, stop, T1, T2. Backtest unvalidated means **research only**.
+- **Intraday:** Scheduled at 10:15 IST, 5-minute ORB + VWAP + relative volume + ADX + NIFTY and sector strength. Requires sector map and completed candles. Outputs underlying cash entry, stop, T1, T2. Backtest unvalidated means **research only**.
 - **BTST:** Scheduled at 15:00 IST. No signal if licensed delivery %, prior 20-session matched-time 15:00 volume, or sector history is absent.
 - **Index Options:** NIFTY, BANKNIFTY, SENSEX CE/PE determined from index direction and OI. Premium levels are hypothetical until premium history and freshness are validated; expiry-day/high-IV warnings are shown. NSE and BSE indices require correctly mapped Dhan security IDs and segments.
 - **F&O Stocks:** Futures price/OI buildup and real option-chain premium scenario; blocks if futures OI is missing. **No invented option premium**.
