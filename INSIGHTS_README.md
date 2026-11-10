@@ -48,7 +48,7 @@ or any local database when applying an update.
 ## Live Scanner Reliability Stage — 11 November 2026
 
 Development update on the existing additive, read-only Market Insights module:
-- The default 30-stock selection prioritizes names in the user-verified sector map; otherwise the old alphabetical first 30 provided little coverage. A manually specified watchlist retains its explicit order.
+- The default 30-stock selection prioritizes names in the user-verified sector map; otherwise the old alphabetical first 30 provided little coverage. A manually specified watchlist filters by the provided symbols rather than using automatic sector priority.
 - Intraday is gated to 10:15 IST (four complete 15-minute intervals); all its underlying and NIFTY/sector five-minute candles must belong to the current session and be completed and sufficiently recent. No stale/holiday setups.
 - F&O futures OI analysis requires a recent completed current-session 15-minute candle.
 - Index Options use the current-session, recent index context. Unverified premium quotes remain **hypothetical research** and are no longer written to the observed-trade journal.
