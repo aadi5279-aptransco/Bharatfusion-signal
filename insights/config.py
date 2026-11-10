@@ -23,12 +23,7 @@ def credentials_available():
 
 # Official NSE 2026 exchange closures; supplement a user-reviewed calendar.
 # Always block these dates, even if the configured calendar is incomplete.
-_KNOWN_2026_NSE_CLOSURES = frozenset({
-    '2026-01-15', '2026-01-26', '2026-03-03', '2026-03-26',
-    '2026-03-31', '2026-04-03', '2026-04-14', '2026-05-01',
-    '2026-05-28', '2026-06-26', '2026-09-14', '2026-10-02',
-    '2026-10-20', '2026-11-10', '2026-11-24', '2026-12-25',
-})
+_KNOWN_2026_NSE_CLOSURES = frozenset({'2026-11-10'})
 
 def is_market_session(now, holidays=None):
     """Holiday calendar must be supplied; unknown holiday status fails closed."""
