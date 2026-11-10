@@ -308,15 +308,22 @@ class InsightsService:
     def scan_index_options(self,now):
         d=self.snapshot('dashboard');indices=d.get('indices',[]);signals=[]
         for idx in indices:
-            if _norm(idx['symbol']) not in ('NIFTY','NIFTY50','BANKNIFTY','NIFTYBANK','SENSEX') or idx['bias'] not in ('Uptrend','Downtrend'):continue
+            if _norm(idx['symbol']) not in ('NIFTY','NIFTY50','BANKNIFTY','NIFTYBANK','SENSEX') or idx['bias'] not in ('Uptrend','Downtrend') or not recent_context(idx,now):
+                continue
             try:
                 item=self._lookup(idx['symbol']);exps=self.broker.expiry_list(item)
                 expiry=next((x for x in sorted(exps) if x>=now.date().isoformat()),None)
                 if not expiry:continue
                 p=options.option_plan(self.broker.option_chain(item,expiry),idx['symbol'],idx['bias'],expiry,now)
                 if p:
-                    p.update(backtest_status='UNVALIDATED',status='WATCH / RESEARCH ONLY',instrument_id=p['security_id'],segment='NSE_FNO' if _norm(idx['symbol'])!='SENSEX' else 'BSE_FNO',instrument_type='OPTIDX');signals.append(p)
-                    self.journal.record(p)
+                    p.update(backtest_status='UNVALIDATED',
+                             status='HYPOTHETICAL — OPTION QUOTE AGE NOT VERIFIED',
+                             instrument_id=p['security_id'],
+                             segment='NSE_FNO' if _norm(idx['symbol'])!='SENSEX' else 'BSE_FNO',
+                             instrument_type='OPTIDX',quote_freshness='NOT VERIFIED',
+                             research_only=True)
+                    signals.append(p)
+                    # Never journal a hypothetical premium price as an observed signal.
             except (ValueError,BrokerUnavailable,KeyError):continue
         self._update('index-options',dict(signals=signals,status='RESEARCH ONLY — PREMIUM BACKTEST NEEDED' if signals else 'SCAN COMPLETE — NO QUALIFIED INDEX OPTION CONTRACTS',
               scanned=len(indices),qualified=len(signals),note='Requires supported expiry/option chain and verified option premium; no trades placed'),now)
@@ -329,6 +336,9 @@ class InsightsService:
             if not future:unavailable+=1;continue
             try:
                 f=self.broker.history(future,now,minutes=15,lookback_days=8,oi=True)
+                if not recent_frame(f,now,15,35):
+                    unavailable+=1
+                    continue
                 s=futures.buildup(f,item['symbol'],now)
                 if not s:continue
                 exps=self.broker.expiry_list(item)
@@ -339,8 +349,11 @@ class InsightsService:
                 if not plan:continue
                 plan.update(strategy=futures.NAME,version=futures.VERSION,
                    reasons=s['reasons']+plan['reasons'],backtest_status='UNVALIDATED',
-                   status='WATCH / BACKTEST NOT VALIDATED',instrument_id=plan['security_id'],segment='NSE_FNO',instrument_type='OPTSTK')
-                self.journal.record(plan);signals.append(plan)
+                   status='HYPOTHETICAL — OPTION QUOTE AGE NOT VERIFIED',
+                   instrument_id=plan['security_id'],segment='NSE_FNO',
+                   instrument_type='OPTSTK',quote_freshness='NOT VERIFIED',research_only=True)
+                # No journal record: option entry premiums are not timestamp-verified.
+                signals.append(plan)
             except (BrokerUnavailable,ValueError,KeyError):unavailable+=1
         self._update('fo-stocks',dict(signals=signals,status='RESEARCH ONLY — option premium backtest required' if signals else 'SCAN COMPLETE — NO QUALIFIED FUTURES/OI SETUPS',
               scanned=len(self._stock_list()[:10]),unavailable_count=unavailable,qualified=len(signals),note='Futures OI and valid option chain are mandatory; no invented premium'),now)
@@ -383,7 +396,7 @@ class InsightsService:
         completed=[]
         try:
             day=now.date().isoformat()
-            jobs=[('dashboard',(9,20),self.dashboard),('intraday',(10,0),self.scan_intraday),
+            jobs=[('dashboard',(9,20),self.dashboard),('intraday',(10,15),self.scan_intraday),
                   ('btst',(15,0),self.scan_btst),('index-options',(10,0),self.scan_index_options),('fo-stocks',(10,0),self.scan_fo)]
             for name,clock,job in jobs:
                 key=(day,name)
