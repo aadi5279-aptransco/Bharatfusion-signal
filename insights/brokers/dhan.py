@@ -109,13 +109,32 @@ class DhanReadOnly:
             return frame[frame.index.date<now.date()].sort_index()
         except (ValueError,KeyError,TypeError):raise BrokerUnavailable('Invalid Dhan daily candles') from None
 
+    @staticmethod
+    def _unwrap_sdk_data(value):
+        """Handle both flat Dhan payloads and nested SDK response envelopes.
+
+        The SDK may return {status:success,data:{status:success,data:[...]}}
+        from expiry_list. Only unwrap dicts composed of envelope keys so that
+        real market payload fields such as oc and last_price stay intact.
+        """
+        for _ in range(3):
+            if not isinstance(value,dict):
+                break
+            if value.get('status')=='failure':
+                raise BrokerUnavailable('Dhan rejected a nested data response')
+            if 'data' not in value or not set(value).issubset({'data','status','remarks'}):
+                break
+            value=value['data']
+        return value
+
     def expiry_list(self,item):
         key=(str(item['segment']),str(item['id']))
         with self._lock:
             v=self._expiry_cache.get(key)
             if v and time.monotonic()-v[0]<3600:return list(v[1])
-        data=self._check(self._sdk().expiry_list(int(item['id']),item['segment']))
-        if not isinstance(data,list):raise BrokerUnavailable('Invalid expiry list')
+        data=self._unwrap_sdk_data(self._check(self._sdk().expiry_list(int(item['id']),item['segment'])))
+        if not isinstance(data,list) or not data or not all(isinstance(x,str) and len(x)==10 for x in data):
+            raise BrokerUnavailable('Invalid expiry list')
         with self._lock:self._expiry_cache[key]=(time.monotonic(),list(data))
         return data
 
@@ -128,8 +147,9 @@ class DhanReadOnly:
             wait=max(0.0,3.1-(time.monotonic()-self._option_last))
             if wait:time.sleep(wait)
             self._option_last=time.monotonic()
-            data=self._check(self._sdk().option_chain(int(item['id']),item['segment'],expiry))
-            if not isinstance(data,dict) or not isinstance(data.get('oc'),dict):raise BrokerUnavailable('Invalid Dhan option chain')
+            data=self._unwrap_sdk_data(self._check(self._sdk().option_chain(int(item['id']),item['segment'],expiry)))
+            if not isinstance(data,dict) or not isinstance(data.get('oc'),dict) or not data['oc']:
+                raise BrokerUnavailable('Invalid Dhan option chain')
             self._option_cache[key]=(time.monotonic(),data)
             return data
 
