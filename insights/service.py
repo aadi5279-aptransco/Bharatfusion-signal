@@ -181,19 +181,34 @@ class InsightsService:
         return nifty,sec
 
     def scan_intraday(self,now):
-        nifty,sectors=self._context();mapping=_sector_map();picks=[];unavailable=0
+        nifty,sectors=self._context();mapping=_sector_map();picks=[];unavailable=0;missing_sector=0;rules_not_met=0;data_assessed=0
         for item in self._stock_list():
             sec=sectors.get(mapping.get(_norm(item['symbol']),mapping.get(_norm(item.get('ticker','')),'')))
             try:
-                if not nifty or nifty['bias']=='UNAVAILABLE' or not sec:continue
+                if not nifty or nifty['bias']=='UNAVAILABLE' or nifty.get('session_date')!=now.date().isoformat():continue
+                if not sec:
+                    missing_sector+=1
+                    continue
                 bars=self.broker.history(item,now,minutes=5)
+                if len(bars)<201 or not any(bars.index.date==now.date()):
+                    unavailable+=1
+                    continue
+                data_assessed+=1
                 s=equity.intraday(bars,item['symbol'],now,nifty['session_change'],sec['session_change'])
+                if s is None:rules_not_met+=1
                 if s:
                     s.update(backtest_status='UNVALIDATED',instrument_id=item['id'],segment=item['segment'],instrument_type=item['instrument']);self.journal.record(s);picks.append(s)
             except (BrokerUnavailable,ValueError):unavailable+=1
         picks.sort(key=lambda x:x['confidence'],reverse=True)
-        data=dict(signals=picks[:10],status='RESEARCH ONLY — BACKTEST VALIDATION REQUIRED',unavailable_count=unavailable,
-                  scanned=len(self._stock_list()))
+        checked=len(self._stock_list())
+        status=('RESEARCH ONLY — BACKTEST VALIDATION REQUIRED' if picks else
+                'NO QUALIFYING RULE-BASED CANDIDATES' if data_assessed else
+                'NO VERIFIED NIFTY/SECTOR CONTEXT' if not nifty or nifty['bias']=='UNAVAILABLE' or nifty.get('session_date')!=now.date().isoformat() or missing_sector else
+                'NO VERIFIED DATA FOR CANDIDATE RULES')
+        data=dict(signals=picks[:10],status=status,unavailable_count=unavailable,
+                  scanned=checked,data_assessed=data_assessed,
+                  missing_sector=missing_sector,rules_not_met=rules_not_met,
+                  note='Zero candidates does not mean zero scanned. Unvalidated strategies remain research only.')
         self._update('intraday',data,now)
         return data
 
@@ -271,7 +286,8 @@ class InsightsService:
                     p.update(backtest_status='UNVALIDATED',status='WATCH / RESEARCH ONLY',instrument_id=p['security_id'],segment='NSE_FNO' if _norm(idx['symbol'])!='SENSEX' else 'BSE_FNO',instrument_type='OPTIDX');signals.append(p)
                     self.journal.record(p)
             except (ValueError,BrokerUnavailable,KeyError):continue
-        self._update('index-options',dict(signals=signals,status='RESEARCH ONLY — PREMIUM BACKTEST NEEDED'),now)
+        self._update('index-options',dict(signals=signals,status='RESEARCH ONLY — PREMIUM BACKTEST NEEDED' if signals else 'SCAN COMPLETE — NO QUALIFIED INDEX OPTION CONTRACTS',
+              scanned=len(indices),qualified=len(signals),note='Requires supported expiry/option chain and verified option premium; no trades placed'),now)
         return signals
 
     def scan_fo(self,now):
@@ -294,7 +310,8 @@ class InsightsService:
                    status='WATCH / BACKTEST NOT VALIDATED',instrument_id=plan['security_id'],segment='NSE_FNO',instrument_type='OPTSTK')
                 self.journal.record(plan);signals.append(plan)
             except (BrokerUnavailable,ValueError,KeyError):unavailable+=1
-        self._update('fo-stocks',dict(signals=signals,status='RESEARCH ONLY — option premium backtest required',unavailable_count=unavailable),now)
+        self._update('fo-stocks',dict(signals=signals,status='RESEARCH ONLY — option premium backtest required' if signals else 'SCAN COMPLETE — NO QUALIFIED FUTURES/OI SETUPS',
+              scanned=len(self._stock_list()[:10]),unavailable_count=unavailable,qualified=len(signals),note='Futures OI and valid option chain are mandatory; no invented premium'),now)
         return signals
 
     def reconcile_outcomes(self,now):
