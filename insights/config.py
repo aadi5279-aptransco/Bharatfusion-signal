@@ -21,9 +21,20 @@ def credentials_available():
     return bool(os.getenv('DHAN_CLIENT_ID') and os.getenv('DHAN_ACCESS_TOKEN'))
 
 
+# Official NSE 2026 exchange closures; supplement a user-reviewed calendar.
+# Always block these dates, even if the configured calendar is incomplete.
+_KNOWN_2026_NSE_CLOSURES = frozenset({
+    '2026-01-15', '2026-01-26', '2026-03-03', '2026-03-26',
+    '2026-03-31', '2026-04-03', '2026-04-14', '2026-05-01',
+    '2026-05-28', '2026-06-26', '2026-09-14', '2026-10-02',
+    '2026-10-20', '2026-11-10', '2026-11-24', '2026-12-25',
+})
+
 def is_market_session(now, holidays=None):
     """Holiday calendar must be supplied; unknown holiday status fails closed."""
     local = now.astimezone(IST)
     if holidays is None:
+        return False
+    if local.year == 2026 and local.date().isoformat() in _KNOWN_2026_NSE_CLOSURES:
         return False
     return local.weekday() < 5 and local.date().isoformat() not in holidays and (9,15) <= (local.hour,local.minute) <= (15,30)
