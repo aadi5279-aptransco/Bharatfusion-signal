@@ -20,7 +20,7 @@ function Signals({items=[],empty='No validated signals available.'}){
    e(Badge,{type:s.direction==='BUY'||s.direction==='CE'?'positive':'negative'},s.direction||'WATCH')),
    e('div',{className:'levels'},e('div',null,e('label',null,'Entry'),e('b',null,price(s.entry))),e('div',null,e('label',null,'Stop-loss'),e('b',{className:'loss'},price(s.sl))),e('div',null,e('label',null,'Target 1'),e('b',null,price(s.t1))),e('div',null,e('label',null,'Target 2'),e('b',null,price(s.t2)))),
    e('div',{className:'signal-foot'},e('span',null,'R:R ',s.rr??'—'),e('span',null,'Score ',s.confidence??'—'),e('span',null,'As of ',s.signal_at||'—')),
-   e(Badge,{type:'warning'},s.backtest_status||s.status||'RESEARCH ONLY'),
+   e(Badge,{type:'warning'},s.status||s.backtest_status||'RESEARCH ONLY'),
    (s.warnings||[]).length?e('p',{className:'small loss'},s.warnings.join(' · ')):null,
    e('details',null,e('summary',null,'Why this candidate?'),e('ul',null,...(s.reasons||['Awaiting qualifying rules']).map((v,j)=>e('li',{key:j},v)))))));
 }
@@ -180,9 +180,17 @@ function App(){
     active==='Analyse'?e(Analyse,{data,onSearch,busy}):null,
     ['Intraday','BTST','Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
      e(ReadinessPanel),
-     e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'Scheduled 10:00 IST':active==='BTST'?'Scheduled 15:00 IST':'Licensed Dhan market data'}),
+     e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'Scheduled 10:15 IST':active==='BTST'?'Scheduled 15:00 IST':'Licensed Dhan market data'}),
        e(Tile,{title:'CANDIDATES',value:(data.signals||[]).length}),e(Tile,{title:'STATUS',value:data.status||'Waiting'}),e(Tile,{title:'LAST SCAN',value:data.updated_at||'Not yet run'})),
-     data.scanned!=null?e('p',{className:'small muted'},'Universe: ',data.scanned,' · Dhan inputs assessed: ',data.data_assessed??'—',' · Missing sector: ',data.missing_sector??'—',' · Data unavailable: ',data.unavailable_count??'—',' · Rules not met: ',data.rules_not_met??'—'):null,
+     data.scanned!=null?e('p',{className:'small muted'},
+       'Universe: ',data.scanned,' · Eligible candle sets: ',data.data_assessed??'—',
+       ' · Sector missing/stale: ',data.missing_sector??'—',
+       ' · Market data unavailable: ',data.unavailable_count??'—',
+       ' · Candles too old: ',data.stale_data??'—',
+       ' · Rules not met: ',data.rules_not_met??'—'):null,
+     data.note?e(Notice,{warning:true},data.note):null,
+     ['Index Options','F&O Stocks'].includes(active)?e(Notice,{warning:true},
+       'Option premiums are hypothetical until quote timestamps, expiry and historical performance are independently verified. No trades are placed or recorded as executed.'):null,
      e(Section,{title:'Rule-based research candidates'},e(Signals,{items:data.signals||[],empty:data.status||'No qualifying signals. Missing inputs are never filled with invented values.'}))) :null,
     active==='Track Record'?e(TrackRecord,{data}):null,
     e('div',{className:'footer'},'Powered by local Python Flask API · Dhan-sourced analytics only · No broker orders · Data and backtests may be incomplete'))));
