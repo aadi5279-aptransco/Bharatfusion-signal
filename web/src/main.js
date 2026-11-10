@@ -108,6 +108,26 @@ function TrackRecord({data}){
       e('tbody',null,(data.backtests||[]).map((v,i)=>e('tr',{key:i},...[v.strategy,v.samples,v.win_rate??'—',v.profit_factor??'—',v.avg_r??'—',v.eligible?'YES':'NO'].map((x,j)=>e('td',{key:j},x))))))):e('p',{className:'muted'},'No independently validated strategy backtests. Trading remains disabled.')),
   e(Section,{title:'Signal journal'},signals.length?e('div',{className:'tablewrap'},e('table',null,e('thead',null,e('tr',null,...['Date','Strategy','Symbol','Direction','Entry','Stop','T1','Outcome'].map(x=>e('th',{key:x},x)))),e('tbody',null,signals.map((s,i)=>e('tr',{key:i},...[s.signal_at,s.strategy,s.symbol,s.direction,price(s.entry),price(s.sl),price(s.t1),s.status].map((v,j)=>e('td',{key:j},v))))))):e('div',{className:'empty'},'Journal is empty. Real observed outcomes will appear here.')));
 }
+function ReadinessPanel(){
+ const [state,setState]=useState(null);const [loading,setLoading]=useState(true);
+ useEffect(()=>{let live=true;api('/api/v1/market-insights/readiness')
+  .then(r=>{if(live)setState(r);}).catch(ex=>{if(live)setState({error:ex.message});})
+  .finally(()=>{if(live)setLoading(false);});return()=>{live=false;};},[]);
+ return e(Section,{title:'Scanner readiness — historical / diagnostic only'},
+  loading?e('p',{className:'muted'},'Checking local scan configuration…'):
+  state?.error?e(Notice,{warning:true},state.error):
+  e('div',null,
+   e('div',{className:'scan-diagnostics'},
+    e('div',null,'Exchange session now: ',e('b',null,state.market_session_now?'OPEN':'CLOSED / HOLIDAY')),
+    e('div',null,'Holiday calendar: ',e('b',null,state.calendar_configured?'Configured':'Missing')),
+    e('div',null,'Dhan credentials: ',e('b',null,state.dhan_credentials_present?'Detected':'Missing')),
+    e('div',null,'Cached index sectors: ',e('b',null,state.cached_index_count,' indices / ',state.cached_sector_count,' sectors')),
+    e('div',null,'Sector mappings: ',e('b',null,state.mapped_sector_symbols)),
+    e('div',null,'Orders: ',e('b',null,'DISABLED'))),
+   e('p',{className:'small muted'},'These checks do not run trading strategies. On a holiday, zero signals and a waiting scanner status are expected.'),
+   ...(state.warnings||[]).map((w,j)=>e('p',{className:'small muted',key:j},'• ',w)),
+   e('p',{className:'small muted'},'For a read-only Dhan data, option-chain and futures OI test, run CHECK_SCANNER_READINESS.bat from your application folder.')));
+}
 function App(){
  const [active,setActive]=useState('Dashboard');const [theme,setTheme]=useState(localStorage.getItem('bharat-theme')||'dark');
  const [health,setHealth]=useState({status:'Connecting…',read_only:true});const [data,setData]=useState({});const [busy,setBusy]=useState(false);const [error,setError]=useState('');
@@ -159,8 +179,10 @@ function App(){
     active==='Dashboard'?e(Dashboard,{data,onRefresh,refreshBusy,refreshState:health.manual_refresh,refreshError}):null,
     active==='Analyse'?e(Analyse,{data,onSearch,busy}):null,
     ['Intraday','BTST','Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
+     e(ReadinessPanel),
      e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'Scheduled 10:00 IST':active==='BTST'?'Scheduled 15:00 IST':'Licensed Dhan market data'}),
        e(Tile,{title:'CANDIDATES',value:(data.signals||[]).length}),e(Tile,{title:'STATUS',value:data.status||'Waiting'}),e(Tile,{title:'LAST SCAN',value:data.updated_at||'Not yet run'})),
+     data.scanned!=null?e('p',{className:'small muted'},'Universe: ',data.scanned,' · Dhan inputs assessed: ',data.data_assessed??'—',' · Missing sector: ',data.missing_sector??'—',' · Data unavailable: ',data.unavailable_count??'—',' · Rules not met: ',data.rules_not_met??'—'):null,
      e(Section,{title:'Rule-based research candidates'},e(Signals,{items:data.signals||[],empty:data.status||'No qualifying signals. Missing inputs are never filled with invented values.'}))) :null,
     active==='Track Record'?e(TrackRecord,{data}):null,
     e('div',{className:'footer'},'Powered by local Python Flask API · Dhan-sourced analytics only · No broker orders · Data and backtests may be incomplete'))));
