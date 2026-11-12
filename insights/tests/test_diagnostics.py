@@ -54,6 +54,9 @@ class ScannerReadinessTests(unittest.TestCase):
  def test_missing_index_context_is_diagnostic_not_signal(self):
   with tempfile.TemporaryDirectory() as path:
    service=InsightsService(FakeBroker(),path)
+   service._shortlist_date='2026-11-11'
+   service._shortlist_finalized=True
+   service._shortlist=[dict(kind='stock',symbol='RELIANCE',id='123',segment='NSE_EQ',instrument='EQUITY')]
    r=service.scan_intraday(datetime(2026,11,11,10,5,tzinfo=IST))
    self.assertEqual(r['data_assessed'],0)
    self.assertEqual(r['signals'],[])
