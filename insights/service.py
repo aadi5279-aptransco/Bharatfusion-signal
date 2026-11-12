@@ -318,9 +318,14 @@ class InsightsService:
                 if not recent_frame(five,now,5,20):
                     stats['stale_data']+=1
                     continue
+                stats['data_assessed']+=1
+                quick=advanced_smc.structure(five,now)
+                if not quick.get('available') or quick['rvol']<2.0 or not (
+                        quick['up_breakout'] or quick['down_breakdown']):
+                    stats['rules_not_met']+=1
+                    continue  # no needless 15m/60m calls for non-breakouts
                 fifteen=self.broker.history(item,now,minutes=15,lookback_days=12)
                 sixty=self.broker.history(item,now,minutes=60,lookback_days=30)
-                stats['data_assessed']+=1
                 results=[]
                 for side in ('BUY','SELL'):
                     result=advanced_smc.signal(five,fifteen,sixty,side,item['symbol'],now,
