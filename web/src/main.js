@@ -124,9 +124,38 @@ function ReadinessPanel(){
     e('div',null,'Cached index sectors: ',e('b',null,state.cached_index_count,' indices / ',state.cached_sector_count,' sectors')),
     e('div',null,'Sector mappings: ',e('b',null,state.mapped_sector_symbols)),
     e('div',null,'Orders: ',e('b',null,'DISABLED'))),
-   e('p',{className:'small muted'},'These checks do not run trading strategies. On a holiday, zero signals and a waiting scanner status are expected.'),
+   e('p',{className:'small muted'},'This panel checks infrastructure only. Preliminary 09:45 rankings are not orders; 10:00 is the target shortlist lock; later checks reuse that shortlist.'),
    ...(state.warnings||[]).map((w,j)=>e('p',{className:'small muted',key:j},'• ',w)),
    e('p',{className:'small muted'},'For a read-only Dhan data, option-chain and futures OI test, run CHECK_SCANNER_READINESS.bat from your application folder.')));
+}
+function IntradaySignals({data}){
+ const [direction,setDirection]=useState('BUY');
+ const isBuy=direction==='BUY';
+ const signals=isBuy?(data.buy_signals||[]):(data.sell_signals||[]);
+ const preview=isBuy?(data.preview_buy||[]):(data.preview_sell||[]);
+ return e(React.Fragment,null,
+   e('div',{className:'direction-tabs','role':'tablist','aria-label':'Intraday direction'},
+    e('button',{type:'button',role:'tab','aria-selected':isBuy,
+      className:'direction-tab '+(isBuy?'is-active buy':''),
+      onClick:()=>setDirection('BUY')},
+      '↗ Breakout + huge volume — BUY'),
+    e('button',{type:'button',role:'tab','aria-selected':!isBuy,
+      className:'direction-tab '+(!isBuy?'is-active sell':''),
+      onClick:()=>setDirection('SELL')},
+      '↘ Breakdown + huge volume — SELL')),
+   e(Section,{title:isBuy?'Buy-side breakout candidates':'Sell-side breakdown candidates'},
+    e('p',{className:'small muted'},isBuy?
+       'Requires 5m upper-range break, ≥2x volume, 15m/60m uptrend, NIFTY + sector relative strength.':
+       'Requires 5m lower-range break, ≥2x volume, 15m/60m downtrend, NIFTY + sector relative weakness.'),
+    e(Signals,{items:signals,empty:!data.shortlist_finalized?
+      'Awaiting 09:45 preliminary and 10:00 finalized watchlist. Early rankings are NOT executable trades.':
+      'No qualifying '+(isBuy?'breakout BUY':'breakdown SELL')+' signals on the locked shortlist.'})),
+   preview.length?e(Section,{title:isBuy?'Early BUY watchlist — NOT signals':'Early SELL watchlist — NOT signals'},
+     e('div',{className:'tablewrap'},e('table',null,
+       e('thead',null,e('tr',null,...['Symbol','Rank score','RVOL','Data as of','Status'].map(k=>e('th',{key:k},k)))),
+       e('tbody',null,preview.map((x,i)=>e('tr',{key:i},
+          e('td',null,x.symbol),e('td',null,x.ranking_score),e('td',null,x.rvol),
+          e('td',null,x.data_asof),e('td',null,x.status))))))):null);
 }
 function App(){
  const [active,setActive]=useState('Dashboard');const [theme,setTheme]=useState(localStorage.getItem('bharat-theme')||'dark');
@@ -181,7 +210,7 @@ function App(){
     ['Intraday','BTST','Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
      e(ReadinessPanel),
      e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'Scheduled 10:15 IST':active==='BTST'?'Scheduled 15:00 IST':'Licensed Dhan market data'}),
-       e(Tile,{title:'CANDIDATES',value:(data.signals||[]).length}),e(Tile,{title:'STATUS',value:data.status||'Waiting'}),e(Tile,{title:'LAST SCAN',value:data.updated_at||'Not yet run'})),
+       e(Tile,{title:'CANDIDATES',value:(data.signals||[]).length,sub:active==='Intraday'?`BUY ${data.qualified_buy||0} · SELL ${data.qualified_sell||0}`:''}),e(Tile,{title:'STATUS',value:data.status||'Waiting'}),e(Tile,{title:'LAST SCAN',value:data.updated_at||'Not yet run'})),
      data.scanned!=null?e('p',{className:'small muted'},
        'Universe: ',data.scanned,' · Eligible candle sets: ',data.data_assessed??'—',
        ' · Sector missing/stale: ',data.missing_sector??'—',
@@ -191,7 +220,8 @@ function App(){
      data.note?e(Notice,{warning:true},data.note):null,
      ['Index Options','F&O Stocks'].includes(active)?e(Notice,{warning:true},
        'Option premiums are hypothetical until quote timestamps, expiry and historical performance are independently verified. No trades are placed or recorded as executed.'):null,
-     e(Section,{title:'Rule-based research candidates'},e(Signals,{items:data.signals||[],empty:data.status||'No qualifying signals. Missing inputs are never filled with invented values.'}))) :null,
+     active==='Intraday'?e(IntradaySignals,{data}):
+     e(Section,{title:'Rule-based research candidates'},e(Signals,{items:data.signals||[],empty:data.status||'No qualifying signals. Missing inputs are never filled with invented values.'}))) ) :null,
     active==='Track Record'?e(TrackRecord,{data}):null,
     e('div',{className:'footer'},'Powered by local Python Flask API · Dhan-sourced analytics only · No broker orders · Data and backtests may be incomplete'))));
 }
