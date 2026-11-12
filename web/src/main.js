@@ -20,6 +20,10 @@ function Signals({items=[],empty='No validated signals available.'}){
    e(Badge,{type:s.direction==='BUY'||s.direction==='CE'?'positive':'negative'},s.direction||'WATCH')),
    e('div',{className:'levels'},e('div',null,e('label',null,'Entry'),e('b',null,price(s.entry))),e('div',null,e('label',null,'Stop-loss'),e('b',{className:'loss'},price(s.sl))),e('div',null,e('label',null,'Target 1'),e('b',null,price(s.t1))),e('div',null,e('label',null,'Target 2'),e('b',null,price(s.t2)))),
    e('div',{className:'signal-foot'},e('span',null,'R:R ',s.rr??'—'),e('span',null,'Score ',s.confidence??'—'),e('span',null,'As of ',s.signal_at||'—')),
+   s.rvol!=null?e('p',{className:'small muted'},'5m relative volume: ',s.rvol,'×'):null,
+   s.mtf?e('p',{className:'small muted'},'Multi-timeframe: ',
+     Object.entries(s.mtf).map(([k,v])=>k+' '+v).join(' · ')):null,
+   s.order_flow_proxy?e('p',{className:'small muted'},'Flow evidence: ',s.order_flow_proxy):null,
    e(Badge,{type:'warning'},s.status||s.backtest_status||'RESEARCH ONLY'),
    (s.warnings||[]).length?e('p',{className:'small loss'},s.warnings.join(' · ')):null,
    e('details',null,e('summary',null,'Why this candidate?'),e('ul',null,...(s.reasons||['Awaiting qualifying rules']).map((v,j)=>e('li',{key:j},v)))))));
