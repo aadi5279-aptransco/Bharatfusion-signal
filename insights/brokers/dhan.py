@@ -153,6 +153,50 @@ class DhanReadOnly:
             self._option_cache[key]=(time.monotonic(),data)
             return data
 
+    def market_quotes(self, items, now=None):
+        """Single Dhan Market Quote batch for initial gainers/losers discovery.
+
+        Quote volume is session-to-date, not relative volume. Deep 5m candle
+        history is separately required before a symbol joins the shortlist.
+        """
+        from urllib.request import Request,urlopen
+        now=(now or datetime.now(IST)).astimezone(IST)
+        if not items:return {}
+        self._sdk()
+        groups={}
+        for item in items[:500]:
+            if item.get('id') and item.get('segment'):
+                try:groups.setdefault(str(item['segment']),[]).append(int(item['id']))
+                except (TypeError,ValueError):continue
+        if not groups:return {}
+        req=Request('https://api.dhan.co/v2/marketfeed/quote',
+            data=json.dumps(groups).encode('utf-8'),
+            headers={'Content-Type':'application/json','Accept':'application/json',
+                     'access-token':self._token,'client-id':str(self.client_id)},
+            method='POST')
+        try:
+            with urlopen(req,timeout=20) as resp:data=json.load(resp)
+            raw=self._unwrap_sdk_data(self._check(data))
+        except Exception:return {}
+        if not isinstance(raw,dict):return {}
+        out={}
+        for item in items:
+            segment=str(item.get('segment',''));key=str(item.get('id',''))
+            part=raw.get(segment,{})
+            quote=part.get(key,{}) if isinstance(part,dict) else {}
+            if not isinstance(quote,dict):continue
+            try:
+                price=float(quote.get('last_price') or 0)
+                session_open=float((quote.get('ohlc') or {}).get('open') or 0)
+                volume=float(quote.get('volume') or 0)
+                if price<=0 or session_open<=0 or volume<=0:continue
+                change_pct=100*(price/session_open-1)
+            except (TypeError,ValueError,ZeroDivisionError):continue
+            if not -40<=change_pct<=40:continue
+            out[key]=dict(change_pct=round(change_pct,3),volume=volume,
+                fetched_at=now.isoformat(),source='DHAN SESSION QUOTE')
+        return out
+
     def depth_snapshots(self, items, now=None):
         """One batched Dhan Market Quote read, never an order or trade tape.
 
