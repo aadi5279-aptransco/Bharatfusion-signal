@@ -477,3 +477,22 @@ Deployment: copy `insights/brokers/dhan.py`,
 `insights/tests/test_spot_session_filter.py` from the development branch
 into your backed-up application, then run the 5 new session-filter tests,
 both unittest suites, and the preflight. React is unchanged.
+
+#### Follow-up: mixed IST offset regression fix
+
+The first offline test fixture joined a `ZoneInfo('Asia/Kolkata')`
+`DatetimeIndex` with a fixed-offset `+05:30` index. Some pandas
+versions yield a generic `Index`, causing `AttributeError` on
+`tz_convert`. Both fixture and adapter are corrected:
+
+- The test explicitly converts the anomalous 18:15 bar into the same
+  `Asia/Kolkata` timezone before appending.
+- The read-only cash/index adapter can safely normalize an index of
+  wholly timezone-aware pandas Timestamps to a uniform IST DatetimeIndex.
+  Naive timestamps fail closed and can never be silently relabeled.
+- Added two regression tests. Expect **7 tests** from
+  `insights.tests.test_spot_session_filter`, then both full test suites.
+
+Upgrade only `insights/brokers/dhan.py` and
+`insights/tests/test_spot_session_filter.py` from this branch.
+No React build, Dhan token, .env or order setting changes are needed.
