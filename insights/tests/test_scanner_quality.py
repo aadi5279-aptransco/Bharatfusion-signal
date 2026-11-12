@@ -57,6 +57,11 @@ class QualityTests(unittest.TestCase):
         class Broker:
             def configured(self):return True
             def instruments(self):return [dict(kind='stock',symbol='TCS',ticker='',id='1')]
+            def history(self,item,now,minutes=5,lookback_days=8):
+                # The last OHLCV candle is from the previous session.
+                idx=pd.DatetimeIndex(['2026-11-09T15:25:00+05:30'])
+                return pd.DataFrame(dict(open=[100],high=[101],low=[99],
+                    close=[100],volume=[200000]),index=idx)
         with tempfile.TemporaryDirectory() as d:
             service=InsightsService(Broker(),d)
             service._snapshots['dashboard']={'indices':[dict(symbol='NIFTY',bias='Uptrend',session_date='2026-11-09',asof='2026-11-09T15:25:00+05:30',session_change=1)],'sectors':[]}
