@@ -6,7 +6,7 @@ aggressor order flow can be inferred from bars.
 from __future__ import annotations
 import math
 import pandas as pd
-from insights.indicators import risk_levels
+from insights.indicators import risk_levels,add_features
 
 
 def trend(frame, min_bars=25):
@@ -114,6 +114,33 @@ def signal(frame5,frame15,frame60,side,symbol,now,index_return,sector_return,
     if own is None or index_return is None or sector_return is None:return None
     if side=='BUY' and not(own>index_return and own>sector_return):return None
     if side=='SELL' and not(own<index_return and own<sector_return):return None
+    try:
+        features=add_features(frame5)
+    except ValueError:
+        return None
+    last=features.iloc[-1]
+    close_series=features.close
+    delta=close_series.diff()
+    gain=delta.clip(lower=0).ewm(alpha=1/14,adjust=False,min_periods=14).mean()
+    loss=(-delta.clip(upper=0)).ewm(alpha=1/14,adjust=False,min_periods=14).mean()
+    rs=float(gain.iloc[-1])/float(loss.iloc[-1]) if float(loss.iloc[-1])>0 else float('inf')
+    rsi=100-100/(1+rs)
+    fast=close_series.ewm(span=12,adjust=False).mean()
+    slow=close_series.ewm(span=26,adjust=False).mean()
+    macd_line=fast-slow
+    macd_hist=macd_line-macd_line.ewm(span=9,adjust=False).mean()
+    macd=float(macd_hist.iloc[-1])
+    adx=float(last.adx)
+    vwap=float(last.vwap)
+    alignment=float(last.ema20)-float(last.ema50)
+    confirmations={
+        'ADX >=20':math.isfinite(adx) and adx>=20,
+        'VWAP aligned':math.isfinite(vwap) and ((close>vwap) if side=='BUY' else (close<vwap)),
+        'RSI aligned':math.isfinite(rsi) and ((rsi>=52) if side=='BUY' else (rsi<=48)),
+        'MACD histogram aligned':math.isfinite(macd) and ((macd>0) if side=='BUY' else (macd<0)),
+        'EMA20/EMA50 aligned':((alignment>0) if side=='BUY' else (alignment<0))
+    }
+    if sum(confirmations.values())<3:return None
     # Order-book quantity is a resting-depth proxy, NOT trade direction/delta.
     flow='UNAVAILABLE — NOT VERIFIED'
     ratio=None
@@ -134,23 +161,24 @@ def signal(frame5,frame15,frame60,side,symbol,now,index_return,sector_return,
           else max(float(frame5.high.tail(3).max()),close+atr))
     try:levels=risk_levels(close,atr,side,stop=stop)
     except ValueError:return None
-    confirmations=[f'5m {side} 20-bar/opening-range structure break',
+    confirmations_list=[f'5m {side} 20-bar/opening-range structure break',
        f'5m volume {m["rvol"]:.2f}x trailing baseline (minimum 2.0x)',
        '15m EMA9/21 trend aligned',
        '60m EMA9/21 trend aligned',
        'Price relative to NIFTY and mapped sector confirmed',
+       f'5m confirmations {sum(confirmations.values())}/5: '+', '.join(k for k,v in confirmations.items() if v),
        'Order flow proxy: '+flow]
-    if m['choch_up' if side=='BUY' else 'choch_down']:confirmations.append('Possible CHoCH proxy (range-based)')
-    if m['fvg_up' if side=='BUY' else 'fvg_down']:confirmations.append('Three-candle FVG proxy')
-    if m['liquidity_sweep_low' if side=='BUY' else 'liquidity_sweep_high']:confirmations.append('Liquidity sweep proxy')
-    confidence=min(85,65+min(10,round((m['rvol']-2)*4))+
+    if m['choch_up' if side=='BUY' else 'choch_down']:confirmations_list.append('Possible CHoCH proxy (range-based)')
+    if m['fvg_up' if side=='BUY' else 'fvg_down']:confirmations_list.append('Three-candle FVG proxy')
+    if m['liquidity_sweep_low' if side=='BUY' else 'liquidity_sweep_high']:confirmations_list.append('Liquidity sweep proxy')
+    confidence=min(90,60+min(10,round((m['rvol']-2)*4))+5*sum(confirmations.values())+
                    (5 if ratio is not None and ((side=='BUY' and ratio>=1.2) or (side=='SELL' and ratio<=.83)) else 0))
     return dict(strategy='MTF SMC Volume Breakout/Breakdown',version='2.0',
         symbol=symbol,direction=side,signal_at=m['data_asof'],confidence=confidence,
         rvol=m['rvol'],structure=m,mtf=dict(m5=side,m15=t15,m60=t60),
         order_flow_proxy=flow,order_flow_ratio=ratio,
         backtest_status='UNVALIDATED',research_only=True,
-        reasons=confirmations,**levels)
+        confirmations=confirmations,adx=round(adx,2),rsi14=round(rsi,2),macd_histogram=round(macd,3),reasons=confirmations_list,**levels)
 
 
 def btst_confirm(frame15,frame60,daily,now):
