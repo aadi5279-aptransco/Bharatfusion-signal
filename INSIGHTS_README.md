@@ -306,3 +306,69 @@ Keep `.env`, historical databases, holiday and sector files intact.
 Run `python -m unittest discover -s insights\\tests -q`
 using the application venv and `npm run build` inside `web`. Both tabs
 are GET-only and require no OpenAlgo key. Never enable broker orders.
+
+## Exact Intraday daily + 15m momentum query and AI-ready top 10 (November 2026)
+
+A new `insights/strategies/momentum_query.py` implementation replaces the old
+mandatory 5m SMC/BOS/sector gates for the Intraday **BUY** and **SELL** tabs.
+All **eight daily criteria** and **three 15m criteria** requested by the user
+must pass, using available **completed** 5m and 15m Dhan equity candles:
+
+- BUY daily: latest close > prior completed daily high; > today's session open;
+  > prior close ×1.01; current session cumulative volume > 1.5 × *latest*
+  20-day volume SMA; close > latest 20-day close SMA; daily RSI14>60;
+  close>₹100; latest daily volume SMA20>500,000 shares.
+- SELL daily: close < previous completed daily low; < today session open;
+  < prior close ×0.99; same high-volume, price and 20-day volume filters;
+  close < latest 20-day close SMA; daily RSI14<40.
+- BUY 15m: last **completed** 15m close>EMA20, RSI14>60, and last
+  15m volume > 2× 20-bar 15m volume SMA. SELL mirrors all three conditions.
+- The current trading day's daily close, open, and *cumulative* volume are
+  built from all completed 5-minute candles since 09:15; the daily RSI and
+  20-day SMAs include that **PROVISIONAL current session** alongside prior
+  closed daily bars. These are not completed daily candles, may change
+  throughout the day, and are not a live order execution claim.
+- Per-stock prior completed daily bars are cached for the session. The live
+  five-minute scanner revisits only the fixed 10:00 shortlist. At the first
+  two discovery passes, ranking does NOT demand all 11 query gates; only the
+  second-stage live signal scan does. Missing history and stale data fail
+  closed. Signals may be zero.
+
+An additional `insights/ai_rank.py` module now ranks up to TEN qualifying
+intraday setups **across both directions**. The ranking gives transparent
+weighted points for current-day/15m relative volume, directional RSI
+strength, consistency of recent completed 5m closes, and initial stop risk.
+This is a deterministic *AI-ready evidence score*, **NOT trained machine
+learning**, NOT a calibrated chance of winning, and NOT validated for
+profitability. A model can replace it only after point-in-time, cost-aware
+walk-forward training and calibration.
+
+Entry is a **conditional trigger** beyond the most recent completed 5m
+candle's high (BUY) or low (SELL), with an ATR buffer; it is *not a filled
+transaction or a guaranteed entry*. The 3-bar structure stop has at least
+0.8× 5m ATR clearance. Risk outside the **0.3%–2%** initial-stop band is
+rejected instead of manipulating the stop to force the trade. Reference
+targets are 1.5R and 2.5R based on that valid stop distance, not promises
+of achievable exit prices. Only qualifying setups are returned, never forced
+to a count of ten. Read-only Dhan mode remains unchanged.
+
+The Intraday page now contains an **AI-ready top 10** table above the
+existing BUY/SELL tabs showing symbol, direction, evidence rank, entry
+trigger, structure/ATR stop, T1, T2, risk percent and daily/15m volume ratios.
+Scores and rule conditions are explained on the detailed signal cards.
+
+**Windows upgrade:** Back up the project and stop START_INSIGHTS.bat.
+Download the development branch ZIP, extract into a separate folder and copy:
+- `insights/service.py` (updated)
+- `insights/strategies/momentum_query.py` (new)
+- `insights/ai_rank.py` (new)
+- `insights/tests/test_ai_intraday.py` (new)
+- `insights/tests/test_diagnostics.py` (updated)
+- `insights/tests/test_scanner_quality.py` (updated)
+- `insights/tests/test_staged_scanners.py` (updated)
+- `web/src/main.js` (updated)
+
+Do not copy or overwrite local `.env`, exchange holiday files, SQLite
+database, token, or local watchlists. Run BOTH Python unittest suites and
+`npm run build` in `web`. The new code and scores still need a real
+Windows test run and independent historical strategy validation.
