@@ -12,3 +12,11 @@
 .refresh-btn:hover:not(:disabled){background:var(--line)}
 .refresh-btn:disabled{opacity:.6;cursor:wait}
 @media(max-width:700px){.manual-toolbar{flex-direction:column;align-items:stretch}.refresh-btn{width:100%}}
+
+.direction-tabs{display:flex;gap:10px;margin:18px 0 14px;flex-wrap:wrap}
+.direction-tab{border:1px solid var(--line);border-radius:9px;background:var(--panel2);color:var(--muted);font-size:13px;font-weight:750;padding:13px 18px;cursor:pointer}
+.direction-tab.is-active{background:var(--panel);border-color:var(--accent);color:var(--ink)}
+.direction-tab.is-active.buy{border-color:var(--green);box-shadow:inset 0 -3px var(--green)}
+.direction-tab.is-active.sell{border-color:var(--red);box-shadow:inset 0 -3px var(--red)}
+.direction-tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:700px){.direction-tab{flex:1;min-width:140px}}
