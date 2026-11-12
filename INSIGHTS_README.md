@@ -449,3 +449,31 @@ and `.venv\\Scripts\\python.exe -m unittest discover -s insights\\tests -q`,
 then `cd web && npm run build && cd ..`. Do not claim the new strategies
 are live-validated or profitable until they pass independent backtests
 with actual historical quote ages, slippage and costs.
+
+### NIFTY extra 18:15 spot candle — session validation (12 November 2026)
+
+The official Dhan NIFTY index feed returned **76** 5-minute records on
+2026-11-12: the valid cash spot sequence **09:15–15:25 IST** (75 bars)
+plus one anomalous **18:15 IST** bar. Do **not** globally shift timestamps:
+the first 75 bars are correctly aligned.
+
+The Dhan adapter now filters only **IDX_I, NSE_EQ and BSE_EQ** intraday
+spot/cash candles to the regular IST 09:15–15:30 session window and to
+the interval-specific 09:15 candle-start grid. These records are excluded
+BEFORE being cached or supplied to charts, Fib reference ranges, opening
+range, RSI, SMC or live research scans. Futures and options histories
+retain their original timestamps (other session hours or special sessions
+require an explicit exchange-calendar validation policy).
+
+Read-only preflight now reports `out_of_session_discarded` and
+`session_check` alongside each candle probe. On a historical NIFTY 5m
+probe covering 2026-11-12, expect 75 regular-session candles and
+`out_of_session_discarded: 1`. The actual returned total can include
+multiple days; the 75 figure refers to the **one session** only.
+No source Dhan payload or local credentials are modified.
+
+Deployment: copy `insights/brokers/dhan.py`,
+`insights/diagnostics.py` and the new
+`insights/tests/test_spot_session_filter.py` from the development branch
+into your backed-up application, then run the 5 new session-filter tests,
+both unittest suites, and the preflight. React is unchanged.
