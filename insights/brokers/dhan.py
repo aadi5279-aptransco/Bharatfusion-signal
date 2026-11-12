@@ -96,16 +96,24 @@ class DhanReadOnly:
     def daily(self,item,now=None,days=450,oi=False):
         now=(now or datetime.now(IST)).astimezone(IST)
         start=now-timedelta(days=days)
+        # Dhan daily toDate is exclusive. After the regular close, request
+        # tomorrow so that today's *completed* daily bar can be included.
+        # During a live session, never request an unfinished current bar.
+        completed_today=(now.hour,now.minute)>=(15,40)
+        until=now+timedelta(days=1) if completed_today else now
         raw=self._check(self._sdk().historical_daily_data(
             security_id=str(item['id']),exchange_segment=item['segment'],instrument_type=item['instrument'],
-            from_date=start.strftime('%Y-%m-%d'),to_date=now.strftime('%Y-%m-%d'),expiry_code=0,oi=oi))
+            from_date=start.strftime('%Y-%m-%d'),to_date=until.strftime('%Y-%m-%d'),expiry_code=0,oi=oi))
         try:
             cols=['open','high','low','close','volume']
             frame=pd.DataFrame({k:raw[k] for k in cols},
                 index=pd.to_datetime(raw['timestamp'],unit='s',utc=True).tz_convert(IST).normalize()).astype(float)
             if oi:
                 frame['oi']=raw['open_interest']
-            # Current partial daily candle cannot be used for historical strategy gates.
+            # This is still read-only Dhan OHLCV. Today may be used only
+            # after close; otherwise discard the incomplete session.
+            if completed_today:
+                return frame[frame.index.date<=now.date()].sort_index()
             return frame[frame.index.date<now.date()].sort_index()
         except (ValueError,KeyError,TypeError):raise BrokerUnavailable('Invalid Dhan daily candles') from None
 
