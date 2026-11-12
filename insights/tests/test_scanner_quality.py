@@ -60,6 +60,9 @@ class QualityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             service=InsightsService(Broker(),d)
             service._snapshots['dashboard']={'indices':[dict(symbol='NIFTY',bias='Uptrend',session_date='2026-11-09',asof='2026-11-09T15:25:00+05:30',session_change=1)],'sectors':[]}
+            service._shortlist_date='2026-11-11'
+            service._shortlist_finalized=True
+            service._shortlist=[dict(kind='stock',symbol='TCS',ticker='',id='1')]
             result=service.scan_intraday(self.now)
             self.assertEqual(result['data_assessed'],0)
             self.assertEqual(result['signals'],[])
