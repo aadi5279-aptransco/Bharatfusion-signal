@@ -263,6 +263,38 @@ class DhanReadOnly:
                 source='DHAN FIVE-LEVEL RESTING MARKET DEPTH — NOT TRADE DELTA')
         return results
 
+    def longterm_instruments(self):
+        """NSE/BSE listed cash equities from the existing official Dhan master.
+
+        This does not alter the narrower F&O universe. BSE listing inclusion
+        is not proof of surveillance status; later eligibility gates require
+        attributed ASM/GSM/circuit-list data.
+        """
+        import data as legacy_data
+        if getattr(legacy_data,'_MASTER',None) is None:
+            self.instruments()  # populates shared detailed instrument master
+        master=getattr(legacy_data,'_MASTER',None)
+        if master is None:
+            raise BrokerUnavailable('Detailed Dhan equity instrument master unavailable')
+        needed={'EXCH_ID','SEGMENT','INSTRUMENT','SECURITY_ID','SYMBOL_NAME','SERIES'}
+        if not needed.issubset(master.columns):
+            raise BrokerUnavailable('Unrecognized Dhan equity master columns')
+        mask=(master['EXCH_ID'].isin(['NSE','BSE'])
+              & (master['SEGMENT']=='E')
+              & (master['INSTRUMENT']=='EQUITY'))
+        subset=master.loc[mask,list(needed)].copy().fillna('')
+        # NSE regular EQ series; BSE cash series can differ.
+        subset=subset[((subset.EXCH_ID=='NSE')&(subset.SERIES=='EQ'))
+                      | ((subset.EXCH_ID=='BSE')&(subset.SERIES!=''))]
+        subset=subset[subset.SECURITY_ID.ne('') & subset.SYMBOL_NAME.ne('')]
+        subset=subset[~subset.SYMBOL_NAME.str.contains('TEST|DUMMY',case=False,regex=True)]
+        subset=subset.drop_duplicates(['EXCH_ID','SECURITY_ID'])
+        return [dict(symbol=row.SYMBOL_NAME,ticker='',id=row.SECURITY_ID,
+                     segment='NSE_EQ' if row.EXCH_ID=='NSE' else 'BSE_EQ',
+                     instrument='EQUITY',kind='stock',
+                     listed_exchange=row.EXCH_ID)
+                for row in subset.itertuples(index=False)]
+
     def instruments(self):
         # Official Dhan-hosted detailed master via pre-existing source parser.
         from data import universe
