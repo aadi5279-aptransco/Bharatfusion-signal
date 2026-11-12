@@ -489,36 +489,67 @@ class InsightsService:
     def run_due(self,now=None):
         now=now or datetime.now(IST)
         calendar=_holiday_set()
-        if not is_market_session(now,calendar):return dict(status='BLOCKED — holiday calendar missing, weekend or outside trading hours')
-        if not self._job_lock.acquire(blocking=False):return dict(status='SCAN ALREADY RUNNING')
+        if not is_market_session(now,calendar):
+            return dict(status='BLOCKED — holiday calendar missing, weekend or outside trading hours')
+        if not self._job_lock.acquire(blocking=False):
+            return dict(status='SCAN ALREADY RUNNING')
         completed=[]
         try:
-            day=now.date().isoformat()
-            jobs=[('dashboard',(9,20),self.dashboard),('intraday',(10,15),self.scan_intraday),
-                  ('btst',(15,0),self.scan_btst),('index-options',(10,0),self.scan_index_options),('fo-stocks',(10,0),self.scan_fo)]
+            date=now.date().isoformat()
+            # Broad stock discovery is ONLY at ~09:45 and ~10:00. Subsequent
+            # monitoring only uses the locked shortlist.
+            jobs=[
+                ('dashboard',(9,20),self.dashboard),
+                ('shortlist-preview',(9,45),lambda stamp:self.discover_shortlist(stamp,final=False)),
+                ('index-options-preview',(9,45),self.scan_index_options),
+                ('shortlist-final',(10,0),lambda stamp:self.discover_shortlist(stamp,final=True)),
+                ('index-options',(10,0),self.scan_index_options),
+                ('fo-stocks',(10,0),self.scan_fo),
+                ('intraday',(10,5),self.scan_intraday),
+                ('btst',(15,0),self.scan_btst)
+            ]
             for name,clock,job in jobs:
-                key=(day,name)
-                if (now.hour,now.minute)<clock or key in self._done:continue
-                try:job(now);completed.append(name)
-                except (BrokerUnavailable,ValueError,KeyError) as exc:
-                    with self._lock:self._last_error=f'{name}: {str(exc)[:160]}'
-                if name in completed:self._done.add(key)
-            # Refresh dashboard every five minutes without overlapping jobs.
+                key=(date,name)
+                if (now.hour,now.minute)<clock or key in self._done:
+                    continue
+                try:
+                    job(now)
+                    completed.append(name)
+                    self._done.add(key)
+                except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
+                    with self._lock:
+                        self._last_error=f'{name}: {str(exc)[:160]}'
             minute=now.hour*60+now.minute
-            key=(day,'dashboard-refresh',minute//5)
-            if minute%5==0 and key not in self._done:
-                if 'dashboard' not in completed:
-                    try:self.dashboard(now);completed.append('dashboard-refresh')
-                    except (BrokerUnavailable,ValueError,KeyError) as exc:
-                        with self._lock:self._last_error=f'dashboard: {str(exc)[:160]}'
-                self._done.add(key)
-            outcome_key=(day,'outcomes',minute//5)
-            if minute%5==0 and outcome_key not in self._done:
-                try:self.reconcile_outcomes(now)
-                except (BrokerUnavailable,ValueError):pass
-                self._done.add(outcome_key)
-            return dict(status='OK',completed=completed)
-        finally:self._job_lock.release()
+            if minute%5==0:
+                key=(date,'dashboard-refresh',minute//5)
+                if key not in self._done:
+                    if 'dashboard' not in completed:
+                        try:
+                            self.dashboard(now)
+                            completed.append('dashboard-refresh')
+                        except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
+                            with self._lock:self._last_error=f'dashboard: {str(exc)[:160]}'
+                    self._done.add(key)
+                # MTF intraday scoring only revisits symbols selected at 10:00.
+                key=(date,'shortlist-monitor',minute//5)
+                if minute>=10*60+5 and key not in self._done:
+                    if 'intraday' not in completed:
+                        try:
+                            self.scan_intraday(now)
+                            completed.append('shortlist-monitor')
+                        except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
+                            with self._lock:self._last_error=f'intraday: {str(exc)[:160]}'
+                    self._done.add(key)
+                key=(date,'outcomes',minute//5)
+                if key not in self._done:
+                    try:self.reconcile_outcomes(now)
+                    except (BrokerUnavailable,ValueError,KeyError,TypeError):pass
+                    self._done.add(key)
+            return dict(status='OK',completed=completed,
+                        shortlist_count=len(self._shortlist),
+                        shortlist_finalized=self._shortlist_finalized)
+        finally:
+            self._job_lock.release()
 
     def start(self):
         if self._thread:return
