@@ -79,6 +79,19 @@ class LongtermStrategyTests(unittest.TestCase):
 
 
 class LongtermSchedulerTests(unittest.TestCase):
+    def test_new_read_only_api_tabs(self):
+        from insights.api import create_app
+        class DummyBroker:
+            def configured(self):return True
+        with tempfile.TemporaryDirectory() as path:
+            svc=InsightsService(DummyBroker(),path)
+            client=create_app(svc).test_client()
+            for suffix in ('swing-trades','multibagger'):
+                response=client.get('/api/v1/market-insights/'+suffix)
+                self.assertEqual(response.status_code,200)
+                self.assertIn('status',response.json)
+            self.assertFalse(client.get('/api/v1/health').json['orders_enabled'])
+
     def test_after_close_only_once_and_never_on_holiday(self):
         class DummyBroker:
             def configured(self):return True
