@@ -60,6 +60,10 @@ class InsightsService:
         self._discovery_mode='NOT RUN'
         self._breadth_quotes=0
         self._discovery_scanned=0
+        self._discovery_data_assessed=0
+        self._discovery_stale=0
+        self._discovery_errors=0
+        self._discovery_missing_structure=0
         self._manual_requested_at=0.0
         self._manual_thread=None
         self._manual_refresh=dict(status='IDLE')
@@ -282,6 +286,10 @@ class InsightsService:
         chosen={str(x['id']):x for x in self._shortlist_up+self._shortlist_down}
         self._shortlist=list(chosen.values())
         self._discovery_scanned=len(universe)
+        self._discovery_data_assessed=available
+        self._discovery_stale=stale
+        self._discovery_errors=errors
+        self._discovery_missing_structure=missing_structure
         self._discovery_mode=mode
         self._breadth_quotes=breadth_count
         self._shortlist_finalized=bool(final)
@@ -328,6 +336,10 @@ class InsightsService:
         mapping=_sector_map()
         selected=list(self._shortlist)
         stats=dict(scanned=len(selected),universe_scanned_at_discovery=self._discovery_scanned,
+                   discovery_data_assessed=self._discovery_data_assessed,
+                   discovery_stale=self._discovery_stale,
+                   discovery_errors=self._discovery_errors,
+                   discovery_missing_structure=self._discovery_missing_structure,
                    shortlisted=len(selected),data_assessed=0,unavailable_count=0,
                    stale_data=0,missing_sector=0,rules_not_met=0)
         buy=[];sell=[]
@@ -379,7 +391,8 @@ class InsightsService:
                 stats['unavailable_count']+=1
         buy.sort(key=lambda x:x['confidence'],reverse=True)
         sell.sort(key=lambda x:x['confidence'],reverse=True)
-        data=dict(status='SHORTLIST SCAN COMPLETE — RESEARCH ONLY',
+        data=dict(status=('NO ELIGIBLE SHORTLIST — SEE DISCOVERY DIAGNOSTICS'
+                           if not selected else 'SHORTLIST SCAN COMPLETE — RESEARCH ONLY'),
                   signals=(buy[:10]+sell[:10]),buy_signals=buy[:10],sell_signals=sell[:10],
                   preview_buy=list(self._preview_buy),preview_sell=list(self._preview_sell),
                   shortlist_symbols=[x['symbol'] for x in selected],
