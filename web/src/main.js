@@ -19,7 +19,7 @@ function Signals({items=[],empty='No validated signals available.'}){
    e('div',{className:'signal-top'},e('div',null,e('h3',null,s.symbol||s.underlying),e(Text,{muted:true},s.strategy||'Rule-based candidate')),
    e(Badge,{type:s.direction==='BUY'||s.direction==='CE'?'positive':'negative'},s.direction||'WATCH')),
    e('div',{className:'levels'},e('div',null,e('label',null,'Entry'),e('b',null,price(s.entry))),e('div',null,e('label',null,'Stop-loss'),e('b',{className:'loss'},price(s.sl))),e('div',null,e('label',null,'Target 1'),e('b',null,price(s.t1))),e('div',null,e('label',null,'Target 2'),e('b',null,price(s.t2)))),
-   e('div',{className:'signal-foot'},e('span',null,'R:R ',s.rr??'—'),e('span',null,'Score ',s.confidence??'—'),e('span',null,'As of ',s.signal_at||'—')),
+   e('div',{className:'signal-foot'},e('span',null,'R:R ',s.rr??'—'),e('span',null,'Rank ',s.ai_score??s.confidence??'—'),e('span',null,'As of ',s.signal_at||'—')),
    s.rvol!=null?e('p',{className:'small muted'},'5m relative volume: ',s.rvol,'×'):null,
    s.mtf?e('p',{className:'small muted'},'Multi-timeframe: ',
      Object.entries(s.mtf).map(([k,v])=>k+' '+v).join(' · ')):null,
@@ -140,12 +140,31 @@ function ReadinessPanel(){
    ...(state.warnings||[]).map((w,j)=>e('p',{className:'small muted',key:j},'• ',w)),
    e('p',{className:'small muted'},'For a read-only Dhan data, option-chain and futures OI test, run CHECK_SCANNER_READINESS.bat from your application folder.')));
 }
+
+function IntradayTopTen({items=[]}){
+ const headers=['#','Symbol','Side','Rank','Entry trigger','Stop','T1','T2','Stop %','Daily RVOL','15m RVOL'];
+ const rows=items.map((x,i)=>{
+  const vals=[i+1,x.symbol,x.direction,x.ai_score??'—',price(x.entry),price(x.sl),price(x.t1),price(x.t2),
+     x.stop_distance_pct!=null?x.stop_distance_pct+'%':'—',
+     x.daily_volume_ratio!=null?x.daily_volume_ratio+'×':'—',
+     x.volume_ratio15!=null?x.volume_ratio15+'×':'—'];
+  return e('tr',{key:x.symbol+x.direction+i},...vals.map((v,j)=>e('td',{key:j},v)));
+ });
+ return e(Section,{title:'AI-ready top 10 momentum setups · BUY and SELL'},
+  e('p',{className:'small muted'},'Transparent evidence ranking, not a trained ML prediction or win probability. All 11 daily/15m rules and ATR/structure risk checks must pass. Entry is a conditional future trigger; no fill or perfect stop is implied.'),
+  items.length?e('div',{className:'tablewrap'},
+   e('table',{className:'research-table'},
+      e('thead',null,e('tr',null,...headers.map(x=>e('th',{key:x},x)))),
+      e('tbody',null,...rows)
+   )):e('div',{className:'empty'},'No qualified candidates yet. We never force ten picks.'));
+}
 function IntradaySignals({data}){
  const [direction,setDirection]=useState('BUY');
  const isBuy=direction==='BUY';
  const signals=isBuy?(data.buy_signals||[]):(data.sell_signals||[]);
  const preview=isBuy?(data.preview_buy||[]):(data.preview_sell||[]);
  return e(React.Fragment,null,
+   e(IntradayTopTen,{items:data.ai_top10||[]}),
    e('div',{className:'direction-tabs','role':'tablist','aria-label':'Intraday direction'},
     e('button',{type:'button',role:'tab','aria-selected':isBuy,
       className:'direction-tab '+(isBuy?'is-active buy':''),
@@ -157,8 +176,8 @@ function IntradaySignals({data}){
       '↘ Breakdown + huge volume — SELL')),
    e(Section,{title:isBuy?'Buy-side breakout candidates':'Sell-side breakdown candidates'},
     e('p',{className:'small muted'},isBuy?
-       'Requires 5m upper-range break, ≥2x volume, 15m/60m uptrend, NIFTY + sector relative strength.':
-       'Requires 5m lower-range break, ≥2x volume, 15m/60m downtrend, NIFTY + sector relative weakness.'),
+       'Daily bullish momentum: all 8 conditions and 15m EMA20/RSI>60/volume >2× average. Provisional daily candle.':
+       'Daily bearish momentum: all 8 conditions and 15m EMA20/RSI<40/volume >2× average. Provisional daily candle.'),
     e(Signals,{items:signals,empty:!data.shortlist_finalized?
       'Awaiting 09:45 preliminary and 10:00 finalized watchlist. Early rankings are NOT executable trades.':
       'No qualifying '+(isBuy?'breakout BUY':'breakdown SELL')+' signals on the locked shortlist.'})),
