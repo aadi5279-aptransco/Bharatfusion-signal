@@ -36,3 +36,10 @@
 .cap-controls input[type="range"]{width:100%;accent-color:var(--accent)}
 .criterion{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:7px 0;border-bottom:1px solid var(--line);font-size:12px}
 .research-candidate h4{font-size:12px;margin:16px 0 7px}
+
+/* Underlying spot Fib studies: readable no-trade / structure diagnostics */
+.fib-evidence{padding:12px 0;border-bottom:1px solid var(--line)}
+.fib-evidence summary{cursor:pointer;color:var(--accent);font-weight:650}
+.fib-evidence p{line-height:1.5}
+.section select{max-width:100%;background:var(--panel2);color:var(--ink);
+ border:1px solid var(--line);border-radius:8px;padding:8px 11px;margin:7px}
