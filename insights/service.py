@@ -613,6 +613,11 @@ class InsightsService:
                 key=(date,name)
                 if (now.hour,now.minute)<clock or key in self._done:
                     continue
+                # A late startup must not replay a fictitious 09:45 preview
+                # and then repeat the full scan at 10:00.
+                if name.endswith('-preview') and (now.hour,now.minute)>=(10,0):
+                    self._done.add(key)
+                    continue
                 try:
                     job(now)
                     completed.append(name)
