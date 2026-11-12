@@ -40,6 +40,22 @@ def _regular_cash_session_bars(frame, item, minutes):
         return frame
     if minutes<=0 or frame.empty:
         return frame
+    # ZoneInfo('Asia/Kolkata') and a fixed +05:30 offset can be mixed
+    # by pandas into a generic Index of timezone-aware Timestamps.  Only
+    # normalize when *every* timestamp has an explicit timezone; never
+    # silently treat naive timestamps as IST or UTC.
+    if not isinstance(frame.index,pd.DatetimeIndex):
+        if not all(isinstance(value,pd.Timestamp) and value.tzinfo is not None
+                   for value in frame.index):
+            raise BrokerUnavailable('Cash/index bars require timezone-aware timestamps')
+        try:
+            converted=pd.to_datetime(frame.index,utc=True).tz_convert(IST)
+        except (ValueError,TypeError) as exc:
+            raise BrokerUnavailable('Invalid timezone-aware cash/index timestamps') from exc
+        frame=frame.copy()
+        frame.index=converted
+    elif frame.index.tz is None:
+        raise BrokerUnavailable('Cash/index bars require timezone-aware timestamps')
     local=frame.index.tz_convert(IST)
     minute_of_day=local.hour*60+local.minute
     open_minute=9*60+15
