@@ -147,3 +147,41 @@ New architecture, still **read-only research**, with no guaranteed win rate:
 5. Visit `http://127.0.0.1:8765`, then `/api/v1/health` and `/api/v1/market-insights/intraday` on a market-open day. Inspect `preview_buy`, `preview_sell`, `shortlist_finalized`, `shortlist_symbols`, `buy_signals`, `sell_signals`, `breadth_quotes`, and `discovery_mode`.
 
 Never overwrite `.env`, `insights_holidays.json`, `insights_sector_map.json`, or SQLite data. Rebuild React after copying source; do not edit `web/dist` by hand. Python and React changes need Windows test verification; this development version is not declared profitable or production-ready.
+
+### Five-minute Index Options and F&O Options refresh (12 November 2026)
+
+After the 09:45 preliminary and 10:00 final research passes, the server
+re-evaluates `index-options` and `fo-stocks` on each five-minute IST
+boundary from **10:05 until market close**. The per-day scheduler keys ensure
+no repeat within one five-minute bucket. A single job lock serializes all
+work, and Dhan's option chain is rate limited/cache controlled by the adapter.
+The React UI polls API snapshots every ~20 seconds; that UI polling does NOT
+trigger additional Dhan scans. When the market is closed or the holiday
+calendar is missing, no scheduled scans run.
+
+- Index Options checks only supported NIFTY/BANKNIFTY/SENSEX context with
+  current completed index bars, SMC-style price break and 15m/60m alignment;
+  index cash OHLCV may legitimately have zero volume, which is *not* evidence
+  of weak liquidity. PCR and OI are positioning proxies.
+- F&O Options checks at most 10 underlyings from the **locked 10:00 shortlist**;
+  it never rescans the broad equity universe on each option refresh.
+- Option quote freshness cannot currently be verified and premiums are
+  explicitly labelled **HYPOTHETICAL**. Empty qualified lists are normal;
+  a missing shortlisted universe is a separate discovery problem.
+- To prevent empty lists caused by prematurely stringent watchlist gates,
+  early selection now ranks positive- and negative-return stocks with
+  available recent OHLCV, reserving room for verified sector-mapped symbols.
+  The later five-minute BUY/SELL signal algorithm **still requires** actual
+  high-volume structural break, multi-timeframe agreement and indicator gates.
+  Discovery diagnostics persist after monitoring, so users can distinguish
+  missing 5-minute bars, invalid opening structure and unqualified signals.
+- Five-minute scheduling is **best effort**, not exact exchange-timestamp
+  streaming. Refresh may finish late when the Dhan API is slow. It does not
+  create orders, fills or verified trading recommendations.
+
+To update an existing Windows installation, stop it and back up the folder,
+then copy only `insights/service.py`, `insights/advanced_smc.py`,
+`insights/tests/test_staged_scheduler.py`, and `web/src/main.js` from
+this branch into the same relative paths. Then run both unittest suites
+and `cd web && npm run build && cd ..`; restart the server. Never overwrite
+the local `.env`, SQLite data, sector map or holiday calendar.
