@@ -7,6 +7,7 @@ evidence. No trading sizes or fills.
 """
 from __future__ import annotations
 import math
+import pandas as pd
 
 def _val(x):
     try:
@@ -65,8 +66,14 @@ def futures_evidence(frame,side,now):
         return dict(status='UNAVAILABLE',reason='Futures OI history missing')
     try:
         current=frame.iloc[-1];previous=frame.iloc[-2]
-        if frame.index[-1]+__import__('pandas').Timedelta(minutes=15)>__import__('pandas').Timestamp(now):
-            return dict(status='UNAVAILABLE',reason='Last futures candle incomplete')
+        current_time=pd.Timestamp(now)
+        candle_time=pd.Timestamp(frame.index[-1])
+        if current_time.tzinfo is None or candle_time.tzinfo is None:
+            return dict(status='UNAVAILABLE',reason='Futures timestamp must be timezone-aware')
+        candle_time=candle_time.tz_convert(current_time.tz)
+        elapsed=(current_time-candle_time).total_seconds()/60
+        if candle_time.date()!=current_time.date() or not 15<=elapsed<=40:
+            return dict(status='UNAVAILABLE',reason='Futures OI candle stale or incomplete')
         oi_now=_val(current.oi);oi_before=_val(previous.oi)
         pnow=_val(current.close);pbefore=_val(previous.close)
         if not all(x is not None and x>0 for x in (oi_now,oi_before,pnow,pbefore)):
