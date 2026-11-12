@@ -13,6 +13,7 @@ from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
 from insights.strategies import swing,multibagger,momentum_query
+from insights import ai_rank
 
 DISCLAIMER='Rule-based research, not investment advice. Signals are not guaranteed; trading can cause significant losses. No orders are placed.'
 
@@ -350,7 +351,7 @@ class InsightsService:
                    stale_data=0,missing_sector=0,rules_not_met=0,
                    missing_daily=0,missing_15m=0,daily_rules_failed=0,
                    fifteen_rules_failed=0)
-        buy=[];sell=[]
+        buy=[];sell=[];risk_rejected=0
         # Dhan's prior daily bars are immutable during the session. Cache
         # once by symbol/day; never refetch all 100 days every 5 minutes.
         self._intraday_daily_cache={
@@ -403,6 +404,10 @@ class InsightsService:
                     result=momentum_query.candidate(
                         five,prior_daily,fifteen,item['symbol'],now,side,flow)
                     if not result:continue
+                    result=ai_rank.assess(result,five,fifteen,raw)
+                    if not result:
+                        risk_rejected+=1
+                        continue
                     result.update(instrument_id=item['id'],segment=item['segment'],
                                   instrument_type=item['instrument'],
                                   quote_freshness='COMPLETED 5m+15m INPUTS; PROVISIONAL DAILY',
@@ -414,12 +419,17 @@ class InsightsService:
                 if not qualified:stats['rules_not_met']+=1
             except (BrokerUnavailable,ValueError,KeyError,TypeError,IndexError):
                 stats['unavailable_count']+=1
-        buy.sort(key=lambda r:(-r['daily_volume_ratio'],-r['volume_ratio15'],r['symbol']))
-        sell.sort(key=lambda r:(-r['daily_volume_ratio'],-r['volume_ratio15'],r['symbol']))
+        buy=ai_rank.top_ten(buy)
+        sell=ai_rank.top_ten(sell)
+        top10=ai_rank.top_ten(buy+sell)
         status=('NO ELIGIBLE SHORTLIST — SEE DISCOVERY DIAGNOSTICS'
                 if not selected else 'DAILY + 15m MOMENTUM QUERY SCAN COMPLETE — RESEARCH ONLY')
-        data=dict(status=status,signals=buy[:10]+sell[:10],
-                  buy_signals=buy[:10],sell_signals=sell[:10],
+        data=dict(status=status,signals=buy+sell,
+                  ai_top10=top10,ai_top10_count=len(top10),
+                  buy_signals=buy,sell_signals=sell,
+                  ranking_model=ai_rank.VERSION,
+                  ranking_label='Explainable AI-ready heuristic; not a trained predictive model',
+                  risk_rejected=risk_rejected,
                   preview_buy=list(self._preview_buy),preview_sell=list(self._preview_sell),
                   shortlist_symbols=[x['symbol'] for x in selected],
                   discovery_mode=self._discovery_mode,breadth_quotes=self._breadth_quotes,
@@ -427,7 +437,7 @@ class InsightsService:
                   shortlist_finalized=True,
                   daily_candle_status='PROVISIONAL current-session OHLCV built from completed 5m candles',
                   query_rules='8 DAILY + 3 COMPLETED 15m MUST ALL PASS',
-                  note='Both directions require every user-specified daily and 15m rule; no additional SMC or sector hard gate. Running daily volume/RSI may change before close; no fills are claimed.')
+                  note='Top 10 are ranked across BUY and SELL using explainable evidence weights; not an AI win probability. All 11 momentum rules must pass first. Entry is a conditional 5m breakout/breakdown trigger; stop uses ATR and 3-bar structure, rejecting excessive risk. Running daily RSI and volume are provisional; no broker fills.')
         self._update('intraday',data,now)
         return data
 
