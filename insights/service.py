@@ -267,7 +267,7 @@ class InsightsService:
         self._discovery_mode=mode
         self._breadth_quotes=breadth_count
         self._shortlist_finalized=bool(final)
-        preview=lambda rows:[dict(symbol=x[2]['symbol'],rvol=x[3]['rvol'],
+        preview=lambda rows,side:[dict(symbol=x[2]['symbol'],rvol=x[3]['rvol'],
              ranking_score=x[0],direction=side,data_asof=x[3]['data_asof'],
              status='EARLY WATCH — NOT A TRADE') for x in rows[:8] if x[0]>=35]
         self._preview_buy=preview(ranked_up,'BUY')
