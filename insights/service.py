@@ -510,7 +510,11 @@ class InsightsService:
                 five=self.broker.history(item,now,minutes=5,lookback_days=8)
                 if not recent_frame(five,now,5,20):continue
                 smc=advanced_smc.structure(five,now)
-                if not smc.get('available') or smc['rvol']<1.5:continue
+                if not smc.get('available'):continue
+                # Cash indices may have zero/unavailable reported volume.
+                # Never use zero index volume as proof of weak flow.
+                # Option-chain OI/PCR supplies a separate positioning proxy.
+                if smc['rvol']>0 and smc['rvol']<1.5:continue
                 if idx['bias']=='Uptrend' and not smc['up_breakout']:continue
                 if idx['bias']=='Downtrend' and not smc['down_breakdown']:continue
                 h15=self.broker.history(item,now,minutes=15,lookback_days=12)
@@ -540,7 +544,7 @@ class InsightsService:
         self._update('index-options',dict(signals=signals,
               status=phase+' — RESEARCH ONLY (OPTION QUOTES UNVERIFIED)' if signals else phase+' — NO QUALIFIED INDEX OPTION SETUPS',
               phase=phase,scanned=len(indices),qualified=len(signals),mtf='5m+15m+60m',
-              note='Index direction requires 5m/15m/60m confirmation. Option OI/PCR are positioning proxies; premium age is unverified; no trades placed'),now)
+              note='Rechecked every 5 minutes. Index direction requires 5m/15m/60m; index volume may be unavailable. Option OI/PCR are positioning proxies; premium age unverified; no trades placed'),now)
         return signals
 
     def scan_fo(self,now):
@@ -591,7 +595,7 @@ class InsightsService:
               status=phase+' — RESEARCH ONLY (PREMIUM FRESHNESS UNKNOWN)' if signals else phase+' — NO QUALIFIED FUTURES/OI SETUPS',
               phase=phase,scanned=len(selected[:10]),shortlisted=len(selected),
               unavailable_count=unavailable,qualified=len(signals),mtf='15m+60m+Futures OI',
-              note='Only discovered stocks are checked. Futures OI and valid option chain mandatory; option premium is hypothetical'),now)
+              note='Rechecked every 5 minutes against locked stock shortlist. Futures OI and valid option chain mandatory; option premium is hypothetical'),now)
         return signals
 
     def reconcile_outcomes(self,now):
