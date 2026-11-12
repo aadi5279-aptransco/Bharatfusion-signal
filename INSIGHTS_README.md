@@ -73,7 +73,7 @@ If a test/build fails, do not continue to live testing. Restore from backup or i
 
 - **Dashboard:** NIFTY/SENSEX rule score: EMA20/50/200, ADX, VWAP and 20-candle structure. India VIX and FII/DII are explicitly unavailable unless separately licensed. Sector change and strength relative to NIFTY, computed from Dhan sector-index candles.
 - **Analyse:** Search by exact Dhan-mapped symbol, or `NIFTY 25000 CE`. Select expiry (optional). PCR, max pain, OI support/resistance, OI changes and strike OI chart derive from the licensed Dhan option-chain response. Historical IV percentile is unavailable without stored IV history. Option premium plan is a **research scenario**, with quote-age warnings.
-- **Intraday:** Scheduled at 10:15 IST, 5-minute ORB + VWAP + relative volume + ADX + NIFTY and sector strength. Requires sector map and completed candles. Outputs underlying cash entry, stop, T1, T2. Backtest unvalidated means **research only**.
+- **Intraday:** 09:45 preliminary discovery, 10:00 final shortlist, then 5-minute shortlist-only monitoring, 5-minute ORB + VWAP + relative volume + ADX + NIFTY and sector strength. Requires sector map and completed candles. Outputs underlying cash entry, stop, T1, T2. Backtest unvalidated means **research only**.
 - **BTST:** Scheduled at 15:00 IST. No signal if licensed delivery %, prior 20-session matched-time 15:00 volume, or sector history is absent.
 - **Index Options:** NIFTY, BANKNIFTY, SENSEX CE/PE determined from index direction and OI. Premium levels are hypothetical until premium history and freshness are validated; expiry-day/high-IV warnings are shown. NSE and BSE indices require correctly mapped Dhan security IDs and segments.
 - **F&O Stocks:** Futures price/OI buildup and real option-chain premium scenario; blocks if futures OI is missing. **No invented option premium**.
@@ -105,3 +105,44 @@ Create `insights/strategies/my_strategy.py` with a stable `NAME`, `VERSION`, and
 - The new API uses Dhan only. The legacy app still contains historical workflows involving external public pages and risk reports; those original code paths are not rewritten or silently enabled in this new service.
 - The React app uses `lightweight-charts` for OI strike charts. A premium/candlestick price chart requires separately licensed time-series OHLC and is not depicted without it.
 - This is a research release, **not yet authenticated against your Dhan account or tested visually on Windows**. No claim of profitability, win rate or guaranteed scan timing is made.
+
+## Advanced SMC / MTF staged scanner — November 2026 development branch
+
+New architecture, still **read-only research**, with no guaranteed win rate:
+- At or after **09:45 IST**, Dhan Market Quote batches up to 500 eligible NSE F&O cash underlyings and returns session return/volume. The configured `INSIGHTS_MAX_SYMBOLS` (default 30) limits **deep 5-minute candle analysis** to the strongest positive and negative quote candidates. If quote API is unavailable, the app clearly labels a limited configured-universe fallback. Session-to-date quote volume is NOT relative volume.
+- Preliminary lists require real 5-minute opening-range/structure breaks with >=1.5x trailing 20-candle volume. These are **watch candidates, not trades**.
+- At or after **10:00 IST**, repeat that deep selection once and lock at most eight top bullish plus eight bearish stocks for the day. If the server starts after 10:00, skip the missed preliminary pass; don't double-scan.
+- From **10:05 IST** on five-minute boundaries, monitor only the locked stocks. Actual research BUY/SELL signals require >=2.0x 5m volume, the 09:15/09:20/09:25 opening range, 20-bar BOS/price structure break, EMA9/21 trend, 15m + 60m trend alignment, and NIFTY/verified-sector relative return confirmation. CHoCH, three-candle FVG and sweep flags are stated as **range-based SMC proxies**.
+- `Intraday` contains two internal tabs: **Breakout BUY** and **Breakdown SELL**, each with qualifying signals and separately labeled non-executable preliminary ranking.
+- Dhan Market Quote's five-level resting bid/ask quantities are sampled in one batch for the shortlist when available. A quote's *last_trade_time* must be verified recent; otherwise the depth ratio is **unavailable**. Resting depth is not market-order aggressor volume, footprint delta, absorption or evidence of a specific institution.
+- Index Options require current completed index 5m structure+volume and 15m/60m directional alignment plus option-chain OI/PCR. F&O Stocks use only the shortlisted underlyings, current 5m structure, 15m/60m trend, actual futures OI build-up and chain metrics.
+- Option premium entry/SL/T1/T2 remain **HYPOTHETICAL, quote age unverified**; they are not recorded as actual executions or observed trades.
+- BTST uses only the locked shortlist and requires verified 15m/60m, prior daily + **completed weekly** bullish trends, historical matched-time volume and user-provided, dated licensed delivery data. Missing delivery or timeframes block a signal rather than inventing data.
+- **Important:** Results are only among the configured/deep-filtered universe, NOT a guarantee to identify every winner among all listed stocks. Only five sector mappings are currently configured in the user's installation; many otherwise strong stocks cannot pass sector-relative confirmation until an accurate sector map is expanded. Scan targets at 09:45/10:00 are *not* timing guarantees, especially on slow networks.
+- Live order placement is still completely disabled.
+
+### Update on existing Windows H:\\ installation
+
+1. Stop `START_INSIGHTS.bat` and copy the existing `BharatSignal_Fusion_Insights` folder as backup.
+2. Download this development branch as ZIP from GitHub; extract in Downloads **separately** from your installation.
+3. Copy ONLY these updated/new source files, preserving paths:
+   - `insights/advanced_smc.py` **new**
+   - `insights/service.py`
+   - `insights/brokers/dhan.py`
+   - `web/src/main.js`
+   - `web/src/styles.css`
+   - `insights/tests/test_advanced_smc.py` **new**
+   - `insights/tests/test_staged_scanners.py` **new**
+   - `insights/tests/test_staged_scheduler.py` **new**
+4. From the installed project root:
+   ```cmd
+   .venv\\Scripts\\python.exe -m unittest discover -s tests -q
+   .venv\\Scripts\\python.exe -m unittest discover -s insights\\tests -q
+   cd web
+   npm run build
+   cd ..
+   START_INSIGHTS.bat
+   ```
+5. Visit `http://127.0.0.1:8765`, then `/api/v1/health` and `/api/v1/market-insights/intraday` on a market-open day. Inspect `preview_buy`, `preview_sell`, `shortlist_finalized`, `shortlist_symbols`, `buy_signals`, `sell_signals`, `breadth_quotes`, and `discovery_mode`.
+
+Never overwrite `.env`, `insights_holidays.json`, `insights_sector_map.json`, or SQLite data. Rebuild React after copying source; do not edit `web/dist` by hand. Python and React changes need Windows test verification; this development version is not declared profitable or production-ready.
