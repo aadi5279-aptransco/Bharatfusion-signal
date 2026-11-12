@@ -55,6 +55,10 @@ class InsightsService:
         self._shortlist=[]
         self._shortlist_up=[]
         self._shortlist_down=[]
+        self._preview_buy=[]
+        self._preview_sell=[]
+        self._discovery_mode='NOT RUN'
+        self._breadth_quotes=0
         self._discovery_scanned=0
         self._manual_requested_at=0.0
         self._manual_thread=None
@@ -208,9 +212,35 @@ class InsightsService:
             self._shortlist=[]
             self._shortlist_up=[]
             self._shortlist_down=[]
+            self._preview_buy=[]
+            self._preview_sell=[]
         if self._shortlist_finalized:
             return dict(status='ALREADY FINALIZED',shortlist_size=len(self._shortlist))
         universe=self._stock_list()
+        mode='CONFIGURED_UNIVERSE_FALLBACK'
+        breadth_count=0
+        if hasattr(self.broker,'market_quotes') and not WATCHLIST:
+            all_stocks=[x for x in self.instruments() if x.get('kind')=='stock']
+            try:quotes=self.broker.market_quotes(all_stocks[:500],now)
+            except (BrokerUnavailable,ValueError,TypeError):quotes={}
+            if quotes:
+                breadth_count=len(quotes)
+                valid=[x for x in all_stocks if str(x.get('id')) in quotes]
+                gainers=sorted(valid,key=lambda x:quotes[str(x['id'])]['change_pct'],reverse=True)
+                losers=sorted(valid,key=lambda x:quotes[str(x['id'])]['change_pct'])
+                picks={}
+                each=max(1,MAX_SYMBOLS//2)
+                for x in gainers[:each]+losers[:each]:
+                    picks[str(x['id'])]=x
+                # Include known-mapped names for sector confirmation where
+                # possible; never invent a sector mapping.
+                for x in valid:
+                    if len(picks)>=MAX_SYMBOLS:break
+                    mapped=_sector_map()
+                    if _norm(x['symbol']) in mapped or _norm(x.get('ticker','')) in mapped:
+                        picks.setdefault(str(x['id']),x)
+                universe=list(picks.values())[:MAX_SYMBOLS]
+                mode='BATCHED_DHAN_QUOTE_PRESELECTION'
         ranked_up=[];ranked_down=[];available=0
         for item in universe:
             try:
@@ -234,16 +264,21 @@ class InsightsService:
         chosen={str(x['id']):x for x in self._shortlist_up+self._shortlist_down}
         self._shortlist=list(chosen.values())
         self._discovery_scanned=len(universe)
+        self._discovery_mode=mode
+        self._breadth_quotes=breadth_count
         self._shortlist_finalized=bool(final)
         preview=lambda rows:[dict(symbol=x[2]['symbol'],rvol=x[3]['rvol'],
              ranking_score=x[0],direction=side,data_asof=x[3]['data_asof'],
              status='EARLY WATCH — NOT A TRADE') for x in rows[:8] if x[0]>=35]
+        self._preview_buy=preview(ranked_up,'BUY')
+        self._preview_sell=preview(ranked_down,'SELL')
         data=dict(status='FINAL SHORTLIST LOCKED — AWAITING 5m/15m/60m CONFIRMATION'
                    if final else '09:45 PRELIMINARY WATCHLIST — NOT TRADE SIGNALS',
                   signals=[],buy_signals=[],sell_signals=[],
-                  preview_buy=preview(ranked_up,'BUY'),
-                  preview_sell=preview(ranked_down,'SELL'),
+                  preview_buy=list(self._preview_buy),
+                  preview_sell=list(self._preview_sell),
                   scanned=len(universe),data_assessed=available,
+                  discovery_mode=mode,breadth_quotes=breadth_count,
                   shortlist_size=len(self._shortlist),shortlist_finalized=bool(final),
                   shortlist_symbols=[x['symbol'] for x in self._shortlist],
                   note='At most two broad discovery passes per session. Later scans monitor only locked symbols; 09:45 rankings are not executable calls.')
@@ -308,6 +343,9 @@ class InsightsService:
         sell.sort(key=lambda x:x['confidence'],reverse=True)
         data=dict(status='SHORTLIST SCAN COMPLETE — RESEARCH ONLY',
                   signals=(buy[:10]+sell[:10]),buy_signals=buy[:10],sell_signals=sell[:10],
+                  preview_buy=list(self._preview_buy),preview_sell=list(self._preview_sell),
+                  shortlist_symbols=[x['symbol'] for x in selected],
+                  discovery_mode=self._discovery_mode,breadth_quotes=self._breadth_quotes,
                   qualified_buy=len(buy),qualified_sell=len(sell),**stats,
                   shortlist_finalized=True,
                   note='BUY = high-volume breakout; SELL = high-volume breakdown (cash-side research). MTF 5m/15m/60m required. Resting order depth is NOT actual trade delta.')
