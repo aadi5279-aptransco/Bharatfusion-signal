@@ -36,10 +36,16 @@ class SchedulingTests(unittest.TestCase):
                 self.assertEqual(service.scan_fo.call_count,2)
                 service.run_due(at(10,5))
                 self.assertEqual(service.scan_intraday.call_count,1)
+                self.assertEqual(service.scan_index_options.call_count,3)
+                self.assertEqual(service.scan_fo.call_count,3)
                 service.run_due(at(10,10))
                 self.assertEqual(service.scan_intraday.call_count,2)
+                self.assertEqual(service.scan_index_options.call_count,4)
+                self.assertEqual(service.scan_fo.call_count,4)
                 service.run_due(at(10,11))
                 self.assertEqual(service.scan_intraday.call_count,2)
+                self.assertEqual(service.scan_index_options.call_count,4)
+                self.assertEqual(service.scan_fo.call_count,4)
                 self.assertEqual(service.discover_shortlist.call_count,2)
 
     def test_holiday_makes_no_broker_calls(self):
