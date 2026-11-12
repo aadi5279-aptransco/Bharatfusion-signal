@@ -4,8 +4,8 @@ import {createChart, CandlestickSeries, HistogramSeries} from 'lightweight-chart
 import './styles.css';
 const e=React.createElement;
 const RISK='Rule-based analytics, not investment advice. Entries and targets are not guaranteed. Trading carries risk of loss. No orders are placed.';
-const tabs=[['Dashboard','▦'],['Analyse','⌕'],['Intraday','↗'],['BTST','◷'],['Index Options','⌁'],['F&O Stocks','≋'],['Track Record','▤']];
-const route={'Dashboard':'dashboard','Analyse':'analyse','Intraday':'intraday','BTST':'btst','Index Options':'index-options','F&O Stocks':'fo-stocks','Track Record':'track-record'};
+const tabs=[['Dashboard','▦'],['Analyse','⌕'],['Intraday','↗'],['BTST','◷'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
+const route={'Dashboard':'dashboard','Analyse':'analyse','Intraday':'intraday','BTST':'btst','Index Options':'index-options','F&O Stocks':'fo-stocks','Swing Trades':'swing-trades','Multibagger':'multibagger','Track Record':'track-record'};
 async function api(url,options={}){const res=await fetch(url,{...options,headers:{Accept:'application/json',...(options.headers||{})},cache:'no-store'});const body=await res.json();if(!res.ok)throw Error(body.error||`HTTP ${res.status}`);return body;}
 function Text({children,muted=false}){return e('span',{className:muted?'muted':''},children);}
 function Badge({children,type=''}){return e('span',{className:`badge ${type}`},children);}
@@ -174,6 +174,65 @@ function IntradaySignals({data}){
           e('td',null,x.symbol),e('td',null,x.ranking_score),e('td',null,x.rvol),
           e('td',null,x.data_asof),e('td',null,x.status))))))):null);
 }
+
+function SwingTrades({data}) {
+ const rows=data.signals||[];
+ const cols=['Symbol','Strategy','Entry','Stop','Target 2R','Target 3R','Risk:Reward','Volume ratio','Trend strength'];
+ const tbody=e('tbody',null,...rows.map((x,i)=>{
+   const values=[x.symbol,x.strategy,price(x.entry),price(x.stop),price(x.target),price(x.target_3r),x.risk_reward??'—',x.volume_ratio==null?'—':x.volume_ratio+'×',x.trend_strength??'—'];
+   return e('tr',{key:i},...values.map((v,j)=>e('td',{key:j},v)));
+ }));
+ const table=e('table',{className:'research-table'},e('thead',null,e('tr',null,...cols.map(k=>e('th',{key:k},k)))),tbody);
+ return e('div',null,
+  e('p',{className:'small muted'},'Daily completed candles only. Entries/targets are research reference levels, not live orders.'),
+  e('p',{className:'small muted'},'Status: ',data.status||'Waiting',' · Updated: ',data.updated_at||'—',' · Universe: ',data.universe??'—'),
+  e(Section,{title:'Swing setups · ranked by Risk:Reward and trend strength'},
+    rows.length?e('div',{className:'tablewrap'},table):e('div',{className:'empty'},'No qualified swing setup from completed daily candles.')));
+}
+function MultibaggerResearch({data}) {
+ const [minCap,setMinCap]=useState(300);
+ const [maxCap,setMaxCap]=useState(20000);
+ const [showUnverified,setShowUnverified]=useState(true);
+ const scored=(data.candidates||[]).map(x=>{
+   const capStatus=x.market_cap_cr==null?'UNVERIFIED':x.market_cap_cr>=minCap&&x.market_cap_cr<=maxCap?'PASS':'FAIL';
+   return {...x,capStatus,eligible:!!x.eligible&&capStatus==='PASS'};
+ });
+ const rows=scored.filter(x=>showUnverified||x.eligible);
+ const criterion=x=>e('div',{className:'criterion',key:x.id},
+   e('span',null,x.label),e('span',{className:'small muted'},x.status,' · ',x.points??0,' point'));
+ const cards=rows.map((x,i)=>{
+   const details=e('details',null,
+     e('summary',null,'Show score breakdown and eligibility checks'),
+     e('h4',null,'Scored technical and fundamental criteria'),
+     ...(x.criteria||[]).map(criterion),
+     e('h4',null,'Mandatory eligibility guards'),
+     ...(x.guards||[]).map(criterion),
+     e('p',null,'Market-cap range: ',x.capStatus));
+   return e('article',{className:'research-candidate',key:x.symbol+i},
+     e('div',{className:'research-candidate-header'},
+       e('strong',null,x.symbol),e('strong',null,x.score,' / ',x.score_max,' points'),
+       e(Badge,{type:x.eligible?'positive':'warning'},x.eligible?'ELIGIBLE':x.eligibility_status==='BLOCKED'||x.capStatus==='FAIL'?'BLOCKED':'UNVERIFIED')),
+     e('p',{className:'small muted'},'Close: ',price(x.last_close),
+       ' · Market cap: ',x.market_cap_cr==null?'UNVERIFIED':'₹'+x.market_cap_cr.toLocaleString('en-IN')+' cr',
+       ' · Avg traded value: ',x.avg_daily_traded_value_lakh==null?'UNVERIFIED':'₹'+x.avg_daily_traded_value_lakh+' lakh',
+       ' · As of: ',x.asof),
+     details);
+ });
+ return e('div',null,
+   e(Notice,{warning:true},'Long-term research only. Market cap, fundamentals, ASM/GSM and circuit flags must be sourced and dated; missing information blocks eligibility.'),
+   e(Section,{title:'Market capitalization filter · ₹ crore'},
+     e('div',{className:'cap-controls'},
+       e('label',null,'Minimum: ',minCap.toLocaleString('en-IN'),
+         e('input',{type:'range',min:0,max:50000,step:100,value:minCap,onChange:v=>setMinCap(Math.min(Number(v.target.value),maxCap))})),
+       e('label',null,'Maximum: ',maxCap.toLocaleString('en-IN'),
+         e('input',{type:'range',min:0,max:50000,step:100,value:maxCap,onChange:v=>setMaxCap(Math.max(Number(v.target.value),minCap))}))),
+     e('label',null,e('input',{type:'checkbox',checked:showUnverified,onChange:v=>setShowUnverified(v.target.checked)}),
+       ' Include blocked/unverified candidates for review')),
+   e('p',{className:'small muted'},'Status: ',data.status||'Waiting',' · Reviewed: ',scored.length,
+     ' · Fully eligible at selected cap: ',scored.filter(x=>x.eligible).length,' · Updated: ',data.updated_at||'—'),
+   e(Section,{title:'Multibagger score breakdown'},
+     cards.length?e('div',{className:'research-candidates'},...cards):e('div',{className:'empty'},'No candidates to show yet.')));
+}
 function App(){
  const [active,setActive]=useState('Dashboard');const [theme,setTheme]=useState(localStorage.getItem('bharat-theme')||'dark');
  const [health,setHealth]=useState({status:'Connecting…',read_only:true});const [data,setData]=useState({});const [busy,setBusy]=useState(false);const [error,setError]=useState('');
@@ -224,6 +283,8 @@ function App(){
     error?e(Notice,{warning:true},error):null,
     active==='Dashboard'?e(Dashboard,{data,onRefresh,refreshBusy,refreshState:health.manual_refresh,refreshError}):null,
     active==='Analyse'?e(Analyse,{data,onSearch,busy}):null,
+    active==='Swing Trades'?e(SwingTrades,{data}):null,
+    active==='Multibagger'?e(MultibaggerResearch,{data}):null,
     ['Intraday','BTST','Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
      e(ReadinessPanel),
      e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'09:45 Preview · 10:00 Final · 5m Follow-up':active==='BTST'?'Scheduled 15:00 IST':'Every 5 min after 10:00 · research'}),
