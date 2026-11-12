@@ -365,6 +365,10 @@ class InsightsService:
             self._update('btst',data,now)
             return data
         stocks=list(self._shortlist)
+        depth_snapshots={}
+        if hasattr(self.broker,'depth_snapshots'):
+            try:depth_snapshots=self.broker.depth_snapshots(stocks,now)
+            except (BrokerUnavailable,ValueError,TypeError):pass
         path=os.getenv('INSIGHTS_LICENSED_DELIVERY_FILE','')
         try:delivery=json.loads(Path(path).read_text('utf-8')) if path else {}
         except (OSError,ValueError,TypeError):delivery={}
@@ -373,9 +377,14 @@ class InsightsService:
             sec=sectors.get(mapping.get(_norm(item['symbol']),mapping.get(_norm(item.get('ticker','')),'')))
             vals=(delivery.get('values') or {})
             dp=vals.get(item['symbol'],vals.get(item.get('ticker',''))) if current else None
-            if not sec or dp is None:skipped+=1;continue
+            if not sec or not recent_context(sec,now) or dp is None:
+                skipped+=1
+                continue
             try:
                 f=self.broker.history(item,now,minutes=5,lookback_days=50)
+                if not recent_frame(f,now,5,20):
+                    skipped+=1
+                    continue
                 daily=self.broker.daily(item,now,days=120)
                 h15=self.broker.history(item,now,minutes=15,lookback_days=12)
                 h60=self.broker.history(item,now,minutes=60,lookback_days=30)
@@ -392,7 +401,17 @@ class InsightsService:
                 if daily.volume_1500.tail(20).isna().any():skipped+=1;continue
                 signal=equity.btst(daily,f,item['symbol'],now,delivery_pct=dp,sector_return=sec['session_change'])
                 if signal:
-                    signal.update(backtest_status='UNVALIDATED',instrument_id=item['id'],segment=item['segment'],instrument_type=item['instrument'])
+                    depth=depth_snapshots.get(str(item['id'])) if depth_snapshots else None
+                    ratio=depth.get('bid_ask_ratio') if depth and depth.get('verified') else None
+                    if ratio is not None and ratio<.83:
+                        skipped+=1  # resting depth contradicts a long-side BTST scenario
+                        continue
+                    signal.update(backtest_status='UNVALIDATED',instrument_id=item['id'],
+                        segment=item['segment'],instrument_type=item['instrument'],
+                        mtf={'15m':'UP','60m':'UP','Daily':'UP','Weekly':'UP'},
+                        order_flow_proxy='Resting five-level bid/ask depth — NOT executed trade delta'
+                            if ratio is not None else 'UNAVAILABLE; dated delivery + matched-time volume only',
+                        order_flow_ratio=ratio,quote_freshness='COMPLETED CASH CANDLES')
                     self.journal.record(signal);picks.append(signal)
             except (BrokerUnavailable,ValueError,KeyError):skipped+=1
         picks.sort(key=lambda x:x['confidence'],reverse=True)
