@@ -503,8 +503,10 @@ class InsightsService:
                     signals.append(p)
                     # Never journal a hypothetical premium price as an observed signal.
             except (ValueError,BrokerUnavailable,KeyError):continue
-        self._update('index-options',dict(signals=signals,status='RESEARCH ONLY — PREMIUM BACKTEST NEEDED' if signals else 'SCAN COMPLETE — NO QUALIFIED INDEX OPTION CONTRACTS',
-              scanned=len(indices),qualified=len(signals),mtf='5m+15m+60m',
+        phase='PRELIMINARY 09:45' if (now.hour,now.minute)<(10,0) else 'FINAL 10:00'
+        self._update('index-options',dict(signals=signals,
+              status=phase+' — RESEARCH ONLY (OPTION QUOTES UNVERIFIED)' if signals else phase+' — NO QUALIFIED INDEX OPTION SETUPS',
+              phase=phase,scanned=len(indices),qualified=len(signals),mtf='5m+15m+60m',
               note='Index direction requires 5m/15m/60m confirmation. Option OI/PCR are positioning proxies; premium age is unverified; no trades placed'),now)
         return signals
 
@@ -551,8 +553,10 @@ class InsightsService:
                 # No journal record: option entry premiums are not timestamp-verified.
                 signals.append(plan)
             except (BrokerUnavailable,ValueError,KeyError):unavailable+=1
-        self._update('fo-stocks',dict(signals=signals,status='RESEARCH ONLY — option premium backtest required' if signals else 'SCAN COMPLETE — NO QUALIFIED FUTURES/OI SETUPS',
-              scanned=len(selected[:10]),shortlisted=len(selected),
+        phase='PRELIMINARY 09:45' if (now.hour,now.minute)<(10,0) else 'FINAL 10:00'
+        self._update('fo-stocks',dict(signals=signals,
+              status=phase+' — RESEARCH ONLY (PREMIUM FRESHNESS UNKNOWN)' if signals else phase+' — NO QUALIFIED FUTURES/OI SETUPS',
+              phase=phase,scanned=len(selected[:10]),shortlisted=len(selected),
               unavailable_count=unavailable,qualified=len(signals),mtf='15m+60m+Futures OI',
               note='Only discovered stocks are checked. Futures OI and valid option chain mandatory; option premium is hypothetical'),now)
         return signals
