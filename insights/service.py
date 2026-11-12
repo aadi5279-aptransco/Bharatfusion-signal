@@ -418,12 +418,28 @@ class InsightsService:
         if bias!='Sideways' or requested_side:
             try:plan=options.option_plan(chain,item['symbol'],bias,selected,now,side_override=requested_side,requested_strike=requested_strike)
             except ValueError as exc:note=str(exc)
-        candles=[]
+        candles=[];mtf={};price_asof=None
         try:
             f=self.broker.history(item,now,minutes=5)
+            price_asof=f.index[-1].isoformat()
+            mtf['5m']=advanced_smc.trend(f)
             candles=[dict(time=int(t.timestamp()),open=float(r.open),high=float(r.high),low=float(r.low),close=float(r.close)) for t,r in f.tail(120).iterrows()]
-        except (BrokerUnavailable,ValueError):pass
+            for interval,days,key in ((15,12,'15m'),(60,30,'60m')):
+                h=self.broker.history(item,now,minutes=interval,lookback_days=days)
+                mtf[key]=advanced_smc.trend(h)
+        except (BrokerUnavailable,ValueError,KeyError):pass
+        market_depth={'status':'UNAVAILABLE — RESTING DEPTH NOT VERIFIED'}
+        if is_market_session(now,_holiday_set()) and hasattr(self.broker,'depth_snapshots'):
+            try:
+                ds=self.broker.depth_snapshots([item],now).get(str(item['id']))
+                if ds and ds.get('verified'):
+                    market_depth={'status':'VERIFIED RESTING BOOK SNAPSHOT — NOT EXECUTED DELTA',
+                                  'bid_ask_ratio':ds['bid_ask_ratio'],
+                                  'last_trade_time':ds.get('last_trade_time')}
+            except (BrokerUnavailable,ValueError,KeyError,TypeError):pass
         return dict(symbol=item['symbol'],expiry=selected,expiries=valid[:15],spot=chain.get('last_price'),candles=candles,
+             price_asof=price_asof,mtf=mtf,market_depth=market_depth,
+             order_flow_proxy='OPTION OI CHANGES AND RESTING BOOK DEPTH; NOT TAPE DELTA',
              bias=bias,metrics=m,plan=plan,status='RESEARCH ONLY — CONTRACT QUOTE FRESHNESS NOT VERIFIED',note=note,disclaimer=DISCLAIMER)
 
     def scan_index_options(self,now):
