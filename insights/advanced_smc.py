@@ -39,6 +39,10 @@ def structure(frame, now=None):
     if len(f)<35:return dict(available=False)
     today=f[f.index.date==f.index[-1].date()]
     if len(today)<4:return dict(available=False)
+    first_three=today.index[:3]
+    # Never call an arbitrary first-15-minute range an opening range.
+    if [(t.hour,t.minute) for t in first_three]!=[(9,15),(9,20),(9,25)]:
+        return dict(available=False)
     last=f.iloc[-1]
     c=float(last.close)
     high20=float(f.high.iloc[-21:-1].max())
