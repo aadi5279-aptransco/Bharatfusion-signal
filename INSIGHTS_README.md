@@ -185,3 +185,121 @@ then copy only `insights/service.py`, `insights/advanced_smc.py`,
 this branch into the same relative paths. Then run both unittest suites
 and `cd web && npm run build && cd ..`; restart the server. Never overwrite
 the local `.env`, SQLite data, sector map or holiday calendar.
+
+## Swing Trades and Multibagger long-term research tabs
+
+**Swing Trades** uses only Dhan completed daily candles, includes a
+21/50 EMA trend-pullback entry, consolidation breakout (>=1.5x prior 50-day
+volume, within 15% 52-week high), RSI(14) pullback reclaim, Supertrend(10,3)
+flip + EMA alignment, and a separate ADX/volume-filtered EMA21/50 crossover.
+Columns: Symbol, Strategy, Entry, Stop, Target 2R, Target 3R, Risk:Reward,
+Volume ratio, Trend strength. Entries are *reference daily closes*, not
+broker fills or current executable prices. Risk/Reward for the 2R plan is
+2.0 by construction; strength and RVOL break ties.
+
+**Multibagger** uses completed Dhan daily candles for 150/200-day averages,
+past weekly/monthly EMA20, 52-week price levels, a score with a separate
+PASS/FAIL/UNVERIFIED row for every criterion, and optional attributable
+fundamental/surveillance/RS-rank files. Its UI has 0–50,000 crore market
+cap sliders, default **₹300–₹20,000 crore**, and explicitly shows missing
+cap data as UNVERIFIED. Every criterion gives exactly 0 or 1 point; do not
+treat the score as a predicted return or success probability.
+
+Mandatory eligibility checks include: NSE/BSE listing and >=365-day listing
+history, verified market cap in selected UI range, 63-session typical-price
+times volume average > ₹50 lakh per day (a transparent OHLCV approximation),
+no ASM/GSM, and no frequent circuit locks. Market-cap sources,
+exchange/surveillance flags, and NIFTY 500 relative-strength percentiles
+are **not included in standard Dhan OHLCV** and must be supplied with dated
+provenance. Missing any of those eligibility checks yields **UNVERIFIED**.
+Verified failure yields **BLOCKED**. The tab allows viewing unverified and
+blocked rows to see which information is missing. This is not a complete
+NSE/BSE survey if the configured Dhan instrument master contains only F&O
+underlyings.
+
+**Scheduling and load:** The regular background scanner runs these two
+long-term research screens **once after 15:40 IST** on configured exchange
+trading dates while the application is running. It does not run on holidays
+and does not conflict with five-minute live option monitoring. An additional
+`INSIGHTS_LONGTERM_MAX_SYMBOLS` option defaults to **80** and can be set
+to a maximum 500 to change off-hours research coverage. This cap does not
+change the intraday shortlist. Historical Dhan requests and tests can be
+slow; partial/missing API history is reported rather than fabricated.
+
+**Optional local data sources** (all three are paths configured locally
+in `.env`, never credentials, and never scraped without permission):
+
+```dotenv
+INSIGHTS_LONGTERM_MAX_SYMBOLS=80
+INSIGHTS_FUNDAMENTALS_FILE=H:\\BharatSignal_Fusion_Ready\\fundamentals_verified.json
+INSIGHTS_SURVEILLANCE_FILE=H:\\BharatSignal_Fusion_Ready\\surveillance_verified.json
+INSIGHTS_RS_RANK_FILE=H:\\BharatSignal_Fusion_Ready\\nifty500_rs_verified.json
+```
+
+Fundamental record shape (illustrative schema ONLY; `EXAMPLE` is not a real
+listed stock or live researched fundamental value):
+
+```json
+{
+  "asof":"2026-11-12",
+  "symbols":{
+    "EXAMPLE":{
+      "source":"NAME OF YOUR LICENSED FUNDAMENTALS PROVIDER",
+      "period_end":"2026-09-30",
+      "market_cap_cr":1200,
+      "sales_cagr_3y":23,
+      "profit_cagr_3y":22,
+      "quarter_profit_yoy":30,
+      "roce":21,
+      "debt_equity":0.25,
+      "promoter_holding":54,
+      "promoter_pledging":0,
+      "operating_cash_flow":100,
+      "peg":1.2
+    }
+  }
+}
+```
+
+Surveillance record shape (actual values must be checked from exchange notices
+and must not be copied from this illustrative example):
+
+```json
+{
+  "asof":"2026-11-12",
+  "symbols":{
+    "EXAMPLE":{
+      "source":"EXCHANGE NOTICE OR LICENSED PROVIDER",
+      "period_end":"2026-11-12",
+      "listed_exchange":"NSE",
+      "listing_date":"2022-01-01",
+      "asm":false,
+      "gsm":false,
+      "frequent_circuit_locks":false
+    }
+  }
+}
+```
+
+NIFTY500 rank shape (requires a verifiable point-in-time ranked universe):
+
+```json
+{"asof":"2026-11-12","source":"LICENSED NIFTY500 RS RANK PROVIDER",
+ "ranks":{"EXAMPLE":78}}
+```
+
+The user must obtain and maintain the underlying datasets. An attractive
+technical score alone is not sufficient to mark a stock ELIGIBLE.
+
+**Windows update:** Back up and stop the existing app. Download the development
+branch ZIP, extract separately, then copy these files preserving paths:
+`insights/service.py`, `insights/api.py`,
+`insights/brokers/dhan.py`,
+`insights/strategies/swing.py` (new),
+`insights/strategies/multibagger.py` (new),
+`insights/tests/test_longterm_research.py` (new),
+`web/src/main.js`, `web/src/styles.css`.
+Keep `.env`, historical databases, holiday and sector files intact.
+Run `python -m unittest discover -s insights\\tests -q`
+using the application venv and `npm run build` inside `web`. Both tabs
+are GET-only and require no OpenAlgo key. Never enable broker orders.
