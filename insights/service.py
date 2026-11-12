@@ -11,6 +11,7 @@ from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
+from insights import advanced_smc
 
 DISCLAIMER='Rule-based research, not investment advice. Signals are not guaranteed; trading can cause significant losses. No orders are placed.'
 
@@ -44,11 +45,17 @@ class InsightsService:
         self._lock=threading.RLock();self._job_lock=threading.Lock()
         self._instruments=[];self._last_error='';self._timestamps={};self._snapshots={
           'dashboard':{'indices':[],'sectors':[],'status':'WAITING FOR DATA'},
-          'intraday':{'signals':[],'status':'WAITING FOR 10:15 IST SCAN'},
+          'intraday':{'signals':[],'buy_signals':[],'sell_signals':[],'status':'WAITING FOR 09:45 SHORTLIST'},
           'btst':{'signals':[],'status':'WAITING FOR 15:00 IST SCAN'},
           'index-options':{'signals':[],'status':'WAITING FOR OPTION CHAIN'},
           'fo-stocks':{'signals':[],'status':'WAITING FOR FUTURES OI'}}
         self._done=set();self._thread=None;self._stop=threading.Event()
+        self._shortlist_date=None
+        self._shortlist_finalized=False
+        self._shortlist=[]
+        self._shortlist_up=[]
+        self._shortlist_down=[]
+        self._discovery_scanned=0
         self._manual_requested_at=0.0
         self._manual_thread=None
         self._manual_refresh=dict(status='IDLE')
@@ -191,56 +198,115 @@ class InsightsService:
         sec={_norm(x['sector']):x for x in snap.get('sectors',[])}
         return nifty,sec
 
-    def scan_intraday(self,now):
-        """Live-session candidates only; no historical or incomplete-bar signals."""
+    def discover_shortlist(self,now,final=False):
+        """One 09:45 preview and 10:00 final broad screen; no repeated universe scans."""
         now=now.astimezone(IST)
+        date=now.date().isoformat()
+        if self._shortlist_date!=date:
+            self._shortlist_date=date
+            self._shortlist_finalized=False
+            self._shortlist=[]
+            self._shortlist_up=[]
+            self._shortlist_down=[]
+        if self._shortlist_finalized:
+            return dict(status='ALREADY FINALIZED',shortlist_size=len(self._shortlist))
+        universe=self._stock_list()
+        ranked_up=[];ranked_down=[];available=0
+        for item in universe:
+            try:
+                candles=self.broker.history(item,now,minutes=5)
+                if not recent_frame(candles,now,5,20):continue
+                score=advanced_smc.rank_early(candles,now)
+                if score is None:continue
+                available+=1
+                if score['rvol']<1.2:continue
+                ranked_up.append((score['up_score'],score['rvol'],item,score))
+                ranked_down.append((score['down_score'],score['rvol'],item,score))
+            except (BrokerUnavailable,ValueError,KeyError,TypeError):continue
+        ranked_up.sort(key=lambda x:(x[0],x[1]),reverse=True)
+        ranked_down.sort(key=lambda x:(x[0],x[1]),reverse=True)
+        self._shortlist_up=[x[2] for x in ranked_up[:8] if x[0]>=35]
+        self._shortlist_down=[x[2] for x in ranked_down[:8] if x[0]>=35]
+        chosen={str(x['id']):x for x in self._shortlist_up+self._shortlist_down}
+        self._shortlist=list(chosen.values())
+        self._discovery_scanned=len(universe)
+        self._shortlist_finalized=bool(final)
+        preview=lambda rows:[dict(symbol=x[2]['symbol'],rvol=x[3]['rvol'],
+             ranking_score=x[0],direction=side,data_asof=x[3]['data_asof'],
+             status='EARLY WATCH — NOT A TRADE') for x in rows[:8] if x[0]>=35]
+        data=dict(status='FINAL SHORTLIST LOCKED — AWAITING 5m/15m/60m CONFIRMATION'
+                   if final else '09:45 PRELIMINARY WATCHLIST — NOT TRADE SIGNALS',
+                  signals=[],buy_signals=[],sell_signals=[],
+                  preview_buy=preview(ranked_up,'BUY'),
+                  preview_sell=preview(ranked_down,'SELL'),
+                  scanned=len(universe),data_assessed=available,
+                  shortlist_size=len(self._shortlist),shortlist_finalized=bool(final),
+                  shortlist_symbols=[x['symbol'] for x in self._shortlist],
+                  note='At most two broad discovery passes per session. Later scans monitor only locked symbols; 09:45 rankings are not executable calls.')
+        self._update('intraday',data,now)
+        return data
+
+    def scan_intraday(self,now):
+        """Monitor only the locked shortlist; 5m+15m+60m and huge volume."""
+        now=now.astimezone(IST)
+        date=now.date().isoformat()
+        if self._shortlist_date!=date or not self._shortlist_finalized:
+            return dict(status='WAITING FOR FINAL 10:00 SHORTLIST',signals=[],buy_signals=[],sell_signals=[])
         nifty,sectors=self._context()
         mapping=_sector_map()
-        stocks=self._stock_list()
-        candidates=[]
-        stats=dict(scanned=len(stocks),data_assessed=0,unavailable_count=0,
+        selected=list(self._shortlist)
+        stats=dict(scanned=len(selected),universe_scanned_at_discovery=self._discovery_scanned,
+                   shortlisted=len(selected),data_assessed=0,unavailable_count=0,
                    stale_data=0,missing_sector=0,rules_not_met=0)
-        context_ok=recent_context(nifty,now)
-        if not context_ok:
-            data=dict(signals=[],status='NO VERIFIED CURRENT-SESSION NIFTY CONTEXT',
-                      **stats,note='No scan until NIFTY candles are fresh and completed.')
+        buy=[];sell=[]
+        if not recent_context(nifty,now):
+            data=dict(status='NO VERIFIED CURRENT-SESSION NIFTY CONTEXT',signals=[],
+                      buy_signals=[],sell_signals=[],**stats)
             self._update('intraday',data,now)
             return data
-        for item in stocks:
+        depths={}
+        if hasattr(self.broker,'depth_snapshots'):
+            try:depths=self.broker.depth_snapshots(selected,now)
+            except (BrokerUnavailable,ValueError,TypeError):depths={}
+        for item in selected:
             sector_name=mapping.get(_norm(item['symbol']),mapping.get(_norm(item.get('ticker','')),''))
             sec=sectors.get(sector_name)
             if not sec or not recent_context(sec,now):
                 stats['missing_sector']+=1
                 continue
             try:
-                bars=self.broker.history(item,now,minutes=5)
-                if not recent_frame(bars,now,5,20):
+                five=self.broker.history(item,now,minutes=5,lookback_days=8)
+                if not recent_frame(five,now,5,20):
                     stats['stale_data']+=1
                     continue
-                if len(bars)<201:
-                    stats['unavailable_count']+=1
-                    continue
+                fifteen=self.broker.history(item,now,minutes=15,lookback_days=12)
+                sixty=self.broker.history(item,now,minutes=60,lookback_days=30)
                 stats['data_assessed']+=1
-                signal=equity.intraday(bars,item['symbol'],now,nifty['session_change'],sec['session_change'])
-                if signal is None:
-                    stats['rules_not_met']+=1
-                    continue
-                signal.update(backtest_status='UNVALIDATED',instrument_id=item['id'],
-                              segment=item['segment'],instrument_type=item['instrument'],
-                              data_asof=bars.index[-1].isoformat(),
-                              quote_freshness='CURRENT COMPLETED CASH CANDLE')
-                self.journal.record(signal)
-                candidates.append(signal)
+                results=[]
+                for side in ('BUY','SELL'):
+                    result=advanced_smc.signal(five,fifteen,sixty,side,item['symbol'],now,
+                        nifty['session_change'],sec['session_change'],
+                        depths.get(str(item['id'])))
+                    if result:
+                        result.update(instrument_id=item['id'],segment=item['segment'],
+                                      instrument_type=item['instrument'],
+                                      data_asof=five.index[-1].isoformat(),
+                                      quote_freshness='COMPLETED 5m CANDLE',
+                                      backtest_status='UNVALIDATED')
+                        results.append(result)
+                if not results:stats['rules_not_met']+=1
+                for result in results:
+                    self.journal.record(result)
+                    (buy if result['direction']=='BUY' else sell).append(result)
             except (BrokerUnavailable,ValueError,KeyError,TypeError):
                 stats['unavailable_count']+=1
-        candidates.sort(key=lambda x:x['confidence'],reverse=True)
-        status=('RESEARCH ONLY — BACKTEST VALIDATION REQUIRED' if candidates
-                else 'NO QUALIFYING RULE-BASED CANDIDATES' if stats['data_assessed']
-                else 'SCANNED — SECTOR HISTORY MISSING/STALE' if stats['missing_sector']
-                else 'SCANNED — STOCK CANDLES MISSING/STALE')
-        data=dict(signals=candidates[:10],status=status,**stats,
-                  qualified=len(candidates),
-                  note='Cash-side research candidates only; no execution and no guarantee.')
+        buy.sort(key=lambda x:x['confidence'],reverse=True)
+        sell.sort(key=lambda x:x['confidence'],reverse=True)
+        data=dict(status='SHORTLIST SCAN COMPLETE — RESEARCH ONLY',
+                  signals=(buy[:10]+sell[:10]),buy_signals=buy[:10],sell_signals=sell[:10],
+                  qualified_buy=len(buy),qualified_sell=len(sell),**stats,
+                  shortlist_finalized=True,
+                  note='BUY = high-volume breakout; SELL = high-volume breakdown (cash-side research). MTF 5m/15m/60m required. Resting order depth is NOT actual trade delta.')
         self._update('intraday',data,now)
         return data
 
