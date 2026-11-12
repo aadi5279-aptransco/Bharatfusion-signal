@@ -153,6 +153,64 @@ class DhanReadOnly:
             self._option_cache[key]=(time.monotonic(),data)
             return data
 
+    def depth_snapshots(self, items, now=None):
+        """One batched Dhan Market Quote read, never an order or trade tape.
+
+        Returned ratios describe resting five-level depth only. They are not
+        actual aggressor delta, footprint or institutional execution.
+        """
+        from urllib.request import Request, urlopen
+        now=(now or datetime.now(IST)).astimezone(IST)
+        if not items:return {}
+        self._sdk()  # verify local token status before network request
+        payload={}
+        for item in items[:200]:
+            if item.get('segment') and item.get('id'):
+                payload.setdefault(str(item['segment']),[]).append(int(item['id']))
+        if not payload:return {}
+        body=json.dumps(payload).encode('utf-8')
+        req=Request('https://api.dhan.co/v2/marketfeed/quote',data=body,
+                    headers={'Content-Type':'application/json',
+                             'Accept':'application/json','access-token':self._token,
+                             'client-id':str(self.client_id)},method='POST')
+        try:
+            with urlopen(req,timeout=20) as resp:
+                obj=json.load(resp)
+            data=self._unwrap_sdk_data(self._check(obj))
+        except Exception:
+            return {}  # optional evidence only; never block price-only analysis
+        if not isinstance(data,dict):return {}
+        results={}
+        for item in items:
+            raw=(data.get(str(item.get('segment')),{}).get(str(item.get('id')),{})
+                 if isinstance(data.get(str(item.get('segment')),{}),dict) else {})
+            if not isinstance(raw,dict):continue
+            depth=raw.get('depth') or {}
+            if not isinstance(depth,dict):continue
+            def quantity(name):
+                entries=depth.get(name) or []
+                if not isinstance(entries,list):return 0
+                return sum(max(0,float(x.get('quantity',0) or 0)) for x in entries[:5]
+                           if isinstance(x,dict))
+            try:bid=quantity('buy');ask=quantity('sell')
+            except (ValueError,TypeError):continue
+            if bid<=0 or ask<=0:continue
+            # A received snapshot is not proof that the exchange last trade
+            # timestamp is recent. Fail closed if it cannot be validated.
+            last=raw.get('last_trade_time')
+            fresh=False
+            if last:
+                try:
+                    t=pd.Timestamp(last)
+                    if t.tzinfo is None:t=t.tz_localize(IST)
+                    else:t=t.tz_convert(IST)
+                    fresh=(t.date()==now.date() and 0<=(now-t.to_pydatetime()).total_seconds()<=120)
+                except (ValueError,TypeError,OverflowError):pass
+            results[str(item['id'])]=dict(verified=fresh,bid_ask_ratio=round(bid/ask,3),
+                observed_at=now.isoformat(),last_trade_time=str(last) if last else None,
+                source='DHAN FIVE-LEVEL RESTING MARKET DEPTH — NOT TRADE DELTA')
+        return results
+
     def instruments(self):
         # Official Dhan-hosted detailed master via pre-existing source parser.
         from data import universe
