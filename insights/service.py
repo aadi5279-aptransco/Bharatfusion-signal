@@ -12,7 +12,7 @@ from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
-from insights.strategies import swing,multibagger,momentum_query
+from insights.strategies import swing,multibagger,momentum_query,fib_smc,fib_oi
 from insights import ai_rank
 
 DISCLAIMER='Rule-based research, not investment advice. Signals are not guaranteed; trading can cause significant losses. No orders are placed.'
@@ -49,8 +49,8 @@ class InsightsService:
           'dashboard':{'indices':[],'sectors':[],'status':'WAITING FOR DATA'},
           'intraday':{'signals':[],'buy_signals':[],'sell_signals':[],'status':'WAITING FOR 09:45 SHORTLIST'},
           'btst':{'signals':[],'status':'WAITING FOR 15:00 IST SCAN'},
-          'index-options':{'signals':[],'status':'WAITING FOR OPTION CHAIN'},
-          'fo-stocks':{'signals':[],'status':'WAITING FOR FUTURES OI'},
+          'index-options':{'signals':[],'fib_setups':[],'status':'WAITING FOR OPTION CHAIN'},
+          'fo-stocks':{'signals':[],'fib_setups':[],'status':'WAITING FOR FUTURES OI'},
           'swing-trades':{'signals':[],'status':'WAITING FOR COMPLETED DAILY SCAN'},
           'multibagger':{'candidates':[],'status':'WAITING FOR COMPLETED DAILY SCAN'}}
         self._done=set();self._thread=None;self._stop=threading.Event()
@@ -550,10 +550,60 @@ class InsightsService:
              order_flow_proxy='OPTION OI CHANGES AND RESTING BOOK DEPTH; NOT TAPE DELTA',
              bias=bias,metrics=m,plan=plan,status='RESEARCH ONLY — CONTRACT QUOTE FRESHNESS NOT VERIFIED',note=note,disclaimer=DISCLAIMER)
 
+    def _fib_setups(self,item,now,cash_five=None):
+        """Independent 09:45 + 12:45 reference studies for spot/cash.
+
+        At most one chain and one futures OI request per underlying, and
+        ONLY after structural confirmation. Option quote age is unknown.
+        Never use futures candles for the reference fib.
+        """
+        now=now.astimezone(IST)
+        try:
+            five=cash_five if cash_five is not None else self.broker.history(
+                item,now,minutes=5,lookback_days=3)
+            # Fail closed on old-session snapshots.
+            if not recent_frame(five,now,5,20):return []
+        except (BrokerUnavailable,ValueError,KeyError,TypeError):return []
+        setups=[fib_smc.evaluate(five,now,key) for key in ('0945','1245')]
+        if not any(x.get('state')=='STRUCTURE_READY' for x in setups):
+            return [dict(x,trade_status='WATCH_ONLY — NO CONFIRMED FIB/SMC',
+                         underlying=item['symbol']) for x in setups]
+        future=item.get('future')
+        fut=None
+        if future:
+            try:fut=self.broker.history(future,now,minutes=15,lookback_days=8,oi=True)
+            except (BrokerUnavailable,ValueError,KeyError,TypeError):pass
+        chain=None;expiry=None
+        try:
+            expiries=self.broker.expiry_list(item)
+            expiry=next((x for x in sorted(expiries) if x>=now.date().isoformat()),None)
+            if expiry:chain=self.broker.option_chain(item,expiry)
+        except (BrokerUnavailable,ValueError,KeyError,TypeError):pass
+        results=[]
+        for row in setups:
+            if row.get('state')=='STRUCTURE_READY':
+                side=row.get('side')
+                ev=fib_oi.futures_evidence(fut,side,now)
+                verified=fib_oi.decide(row,chain,ev)
+            else:
+                verified=fib_oi.decide(row)
+            verified['underlying']=item['symbol']
+            verified['expiry']=expiry
+            verified['premium_status']='UNVERIFIED — DO NOT USE SPOT LEVELS AS OPTION PREMIUM PRICES'
+            results.append(verified)
+        return results
+
     def scan_index_options(self,now):
-        d=self.snapshot('dashboard');indices=d.get('indices',[]);signals=[]
+        d=self.snapshot('dashboard');indices=d.get('indices',[]);signals=[];fib_setups=[]
+        fib_seen=set()
         for idx in indices:
-            if _norm(idx['symbol']) not in ('NIFTY','NIFTY50','BANKNIFTY','NIFTYBANK','SENSEX') or idx['bias'] not in ('Uptrend','Downtrend') or not recent_context(idx,now):
+            if _norm(idx['symbol']) not in ('NIFTY','NIFTY50','BANKNIFTY','NIFTYBANK','SENSEX'):
+                continue
+            item=self._lookup(idx['symbol'])
+            if item is not None and _norm(item['symbol']) not in fib_seen:
+                fib_seen.add(_norm(item['symbol']))
+                fib_setups.extend(self._fib_setups(item,now))
+            if idx['bias'] not in ('Uptrend','Downtrend') or not recent_context(idx,now):
                 continue
             try:
                 item=self._lookup(idx['symbol'])
@@ -592,17 +642,18 @@ class InsightsService:
                     # Never journal a hypothetical premium price as an observed signal.
             except (ValueError,BrokerUnavailable,KeyError):continue
         phase='PRELIMINARY 09:45' if (now.hour,now.minute)<(10,0) else 'FINAL 10:00'
-        self._update('index-options',dict(signals=signals,
+        self._update('index-options',dict(signals=signals,fib_setups=fib_setups,
               status=phase+' — RESEARCH ONLY (OPTION QUOTES UNVERIFIED)' if signals else phase+' — NO QUALIFIED INDEX OPTION SETUPS',
               phase=phase,scanned=len(indices),qualified=len(signals),mtf='5m+15m+60m',
               note='Rechecked every 5 minutes. Index direction requires 5m/15m/60m; index volume may be unavailable. Option OI/PCR are positioning proxies; premium age unverified; no trades placed'),now)
         return signals
 
     def scan_fo(self,now):
-        signals=[];unavailable=0
+        signals=[];unavailable=0;fib_setups=[]
         selected=(list(self._shortlist) if self._shortlist_date==now.date().isoformat()
                   else [])
         for item in selected[:10]:
+            fib_setups.extend(self._fib_setups(item,now))
             future=item.get('future')
             if not future:unavailable+=1;continue
             try:
@@ -642,7 +693,7 @@ class InsightsService:
                 signals.append(plan)
             except (BrokerUnavailable,ValueError,KeyError):unavailable+=1
         phase='PRELIMINARY 09:45' if (now.hour,now.minute)<(10,0) else 'FINAL 10:00'
-        self._update('fo-stocks',dict(signals=signals,
+        self._update('fo-stocks',dict(signals=signals,fib_setups=fib_setups,
               status=phase+' — RESEARCH ONLY (PREMIUM FRESHNESS UNKNOWN)' if signals else phase+' — NO QUALIFIED FUTURES/OI SETUPS',
               phase=phase,scanned=len(selected[:10]),shortlisted=len(selected),
               unavailable_count=unavailable,qualified=len(signals),mtf='15m+60m+Futures OI',
