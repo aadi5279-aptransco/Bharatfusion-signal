@@ -372,3 +372,80 @@ Do not copy or overwrite local `.env`, exchange holiday files, SQLite
 database, token, or local watchlists. Run BOTH Python unittest suites and
 `npm run build` in `web`. The new code and scores still need a real
 Windows test run and independent historical strategy validation.
+
+## Additional Fib + SMC + OI option research setups (12 November 2026)
+
+Two additional **separately labeled** studies appear in both **Index Options**
+and **F&O Stocks**, alongside and *without modifying* the existing
+trend/OI-based research candidate list. These studies are checked by the
+already-scheduled 5-minute refreshes after 10:00. The 9:45 study can be
+evaluated as soon as two subsequent 5-minute candles have closed (earliest
+09:55). The 12:45 study cannot form until the 12:45–13:15 reference candle
+is **fully complete**, with earliest two-post-close confirmation around
+13:25. Exact verification depends on fresh Dhan data.
+
+### 9:45 opening range
+- Six SPOT five-minute candles from **09:15–09:45** construct range HIGH (1)
+  and LOW (0). Fib levels are **0, 0.44, 0.5, 1**; the 0.44–0.5 band is
+  explicitly no-trade.
+- Two completed five-minute closes above 0.5 give a provisional bullish
+  bias; two closes below 0.44 give a provisional bearish bias.
+- Observable sweep/BOS/CHoCH-style evidence, a retrace/retest into a previously
+  formed three-candle imbalance (FVG) or last opposite candle (order-block
+  proxy), and a directionally confirming close are **all** required for
+  `STRUCTURE_READY`. SMC labels are objective price-range *proxies*, not
+  evidence of actual institutional positioning.
+- Spot entry is the five-minute close after the pullback/retest; spot stop
+  is outside the identified order block or gap invalidation. The opening
+  range high/low becomes the preferred first target if still ahead of price;
+  otherwise the first target uses 1.5R; the second uses 2R. This is a
+  SPOT-price research scenario only, never an option premium plan.
+
+### 12:45–13:15 thirty-minute candle
+- The 12:45 reference is assembled from **exactly 6 completed SPOT 5m bars**
+  (12:45, 12:50, 12:55, 13:00, 13:05, 13:10) to prevent fetching a
+  misaligned/incomplete 30m candle. The fib is always **low=0, high=1**,
+  regardless of green/red candle color.
+- If green: bullish sustain >0.5, bearish sustain <0, and 0–0.5 no-trade.
+- If red: bullish sustain >1, bearish sustain <0.44, and 0.44–1 no-trade.
+  Both require two subsequent completed 5m closes and SMC retest evidence.
+- Watch for wicks across the 30m extremes; one wick alone cannot confirm a
+  reversal. The study uses price-based sweep/BOS/CHoCH/FVG/OB *proxies*.
+
+### OI validation
+- OI-based classification compares the current Dhan option-chain OI against
+  any actually provided `previous_oi` values for the nearest five strikes,
+  and compares total PCR with its previous-OI baseline. It is NOT a live
+  five-minute PCR *time series* and never claims one.
+- The confirming side also requires **actual separate completed 15m futures
+  OI candles**: CE requires rising futures price and OI; PE requires falling
+  futures price and rising OI. For indices, the nearest FUTIDX is matched
+  by exact Dhan master underlying instrument ID, never guessed by name.
+- If the chain/futures is missing, inconsistent or contrary, the study is
+  **WATCH_ONLY** or **SKIP**, not an OI-confirmed signal.
+- The final `OI_CONFIRMED_SPOT_RESEARCH` label does NOT verify executable
+  option quote freshness, payoff, order book, fills, performance or win rate.
+  Actual CE/PE premium entry, stops and target levels remain **unverified**.
+- Stock-option studies use only the finalized 10:00 stock shortlist (up to
+  ten names) and never perform additional full-universe discovery every five
+  minutes. Index-option studies use only the mapped major index SPOT feeds.
+- The UI exposes fib levels, structure status, spot-only reference levels,
+  no-trade reasons, near-strike OI and futures evidence separately from the
+  existing option strategy signals.
+
+**Files to update on an existing Windows installation:** from the GitHub
+development branch, preserve their relative paths:
+- `insights/strategies/fib_smc.py` (new)
+- `insights/strategies/fib_oi.py` (new)
+- `insights/tests/test_fib_smc_options.py` (new)
+- `insights/service.py` (updated)
+- `insights/brokers/dhan.py` (updated)
+- `web/src/main.js` (updated)
+
+Stop and back up BharatSignal Fusion first. Never overwrite `.env`,
+SQLite databases or calendar/configuration. After copying, run
+`.venv\\Scripts\\python.exe -m unittest discover -s tests -q`
+and `.venv\\Scripts\\python.exe -m unittest discover -s insights\\tests -q`,
+then `cd web && npm run build && cd ..`. Do not claim the new strategies
+are live-validated or profitable until they pass independent backtests
+with actual historical quote ages, slippage and costs.
