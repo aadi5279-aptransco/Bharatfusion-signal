@@ -22,6 +22,38 @@ def _expires_at(token):
     except (IndexError,ValueError,KeyError,TypeError):return None
 
 
+def _regular_cash_session_bars(frame, item, minutes):
+    """Keep completed regular-session cash/index candles on the 09:15 grid.
+
+    NSE/BSE CASH and INDEX spot have a normal 09:15–15:30 IST session.
+    This intentionally does NOT filter futures/options, which may have
+    different market hours. Unusual special trading sessions require an
+    explicitly reviewed calendar, not accidental off-session inclusion.
+    Record discarded bars for the read-only diagnostics.
+    """
+    kind=str(item.get('kind',''))
+    segment=str(item.get('segment',''))
+    if not (kind in ('index','sector','stock') or segment in
+            ('IDX_I','NSE_EQ','BSE_EQ')):
+        return frame
+    if segment not in ('IDX_I','NSE_EQ','BSE_EQ'):
+        return frame
+    if minutes<=0 or frame.empty:
+        return frame
+    local=frame.index.tz_convert(IST)
+    minute_of_day=local.hour*60+local.minute
+    open_minute=9*60+15
+    close_minute=15*60+30
+    valid=((minute_of_day>=open_minute) &
+           (minute_of_day+minutes<=close_minute) &
+           ((minute_of_day-open_minute)%minutes==0))
+    removed=int((~valid).sum())
+    clean=frame.loc[valid].copy()
+    clean.attrs['out_of_session_discarded']=removed
+    clean.attrs['session_check']='CASH/INDEX SPOT 09:15–15:30 IST'
+    return clean
+
+
 class DhanReadOnly:
     name='DHAN'
     def __init__(self,client_id=None,token=None):
@@ -88,7 +120,11 @@ class DhanReadOnly:
                 frame['oi']=raw['open_interest']
             frame=frame.astype(float).sort_index()
             frame=frame[frame.index+pd.Timedelta(minutes=minutes)<=pd.Timestamp(now)]
-            if frame.empty:raise ValueError('No completed candles')
+            # A Dhan index response can contain a spurious late timestamp
+            # (e.g. NIFTY 18:15). Do not shift timestamps globally: the
+            # earlier 09:15–15:25 IST bars are already aligned correctly.
+            frame=_regular_cash_session_bars(frame,item,minutes)
+            if frame.empty:raise ValueError('No completed regular-session candles')
         except (KeyError,TypeError,ValueError) as exc:raise BrokerUnavailable('Invalid Dhan OHLCV') from exc
         with self._lock:self._history_cache[key]=(time.monotonic(),frame.copy())
         return frame
