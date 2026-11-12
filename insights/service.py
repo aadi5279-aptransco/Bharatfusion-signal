@@ -677,7 +677,7 @@ class InsightsService:
         surveillance=self._dated_research_bundle('INSIGHTS_SURVEILLANCE_FILE')
         # NIFTY 500 relative strength ranks must be independently sourced.
         rank_source=self._dated_research_bundle('INSIGHTS_RS_RANK_FILE')
-        rank_rows=rank_source.get('ranks',{}) if isinstance(rank_source,dict) else {}
+        rank_rows=rank_source.get('ranks',{}) if isinstance(rank_source,dict) and str(rank_source.get('source','')).strip() else {}
         rank_date=rank_source.get('asof') if isinstance(rank_source,dict) else None
         if rank_date:
             try:
