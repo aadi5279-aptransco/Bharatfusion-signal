@@ -595,14 +595,23 @@ class InsightsService:
 
     def scan_index_options(self,now):
         d=self.snapshot('dashboard');indices=d.get('indices',[]);signals=[];fib_setups=[]
-        fib_seen=set()
+        # Independent of the previous trend score: an intraday Fib reversal
+        # must not disappear simply because dashboard bias is Sideways.
+        try:
+            available=[x for x in self.instruments() if x.get('kind')=='index'
+                       and _norm(x['symbol']) in
+                       ('NIFTY','NIFTY50','BANKNIFTY','NIFTYBANK','SENSEX')]
+        except BrokerUnavailable:
+            available=[]
+        seen=set()
+        for item in available:
+            norm=_norm(item['symbol'])
+            if norm in seen:continue
+            seen.add(norm)
+            fib_setups.extend(self._fib_setups(item,now))
         for idx in indices:
             if _norm(idx['symbol']) not in ('NIFTY','NIFTY50','BANKNIFTY','NIFTYBANK','SENSEX'):
                 continue
-            item=self._lookup(idx['symbol'])
-            if item is not None and _norm(item['symbol']) not in fib_seen:
-                fib_seen.add(_norm(item['symbol']))
-                fib_setups.extend(self._fib_setups(item,now))
             if idx['bias'] not in ('Uptrend','Downtrend') or not recent_context(idx,now):
                 continue
             try:
