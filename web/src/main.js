@@ -199,7 +199,8 @@ function MultibaggerResearch({data}) {
  });
  const rows=scored.filter(x=>showUnverified||x.eligible);
  const criterion=x=>e('div',{className:'criterion',key:x.id},
-   e('span',null,x.label),e('span',{className:'small muted'},x.status,' · ',x.points??0,' point'));
+   e('span',null,x.label,' · ',x.source||'Unverified source'),
+   e('span',{className:'small muted'},x.status,' · ',x.points??0,' point'));
  const cards=rows.map((x,i)=>{
    const details=e('details',null,
      e('summary',null,'Show score breakdown and eligibility checks'),
