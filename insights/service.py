@@ -390,7 +390,13 @@ class InsightsService:
             if _norm(idx['symbol']) not in ('NIFTY','NIFTY50','BANKNIFTY','NIFTYBANK','SENSEX') or idx['bias'] not in ('Uptrend','Downtrend') or not recent_context(idx,now):
                 continue
             try:
-                item=self._lookup(idx['symbol']);exps=self.broker.expiry_list(item)
+                item=self._lookup(idx['symbol'])
+                if item is None:continue
+                h15=self.broker.history(item,now,minutes=15,lookback_days=12)
+                h60=self.broker.history(item,now,minutes=60,lookback_days=30)
+                expected='UP' if idx['bias']=='Uptrend' else 'DOWN'
+                if advanced_smc.trend(h15)!=expected or advanced_smc.trend(h60)!=expected:continue
+                exps=self.broker.expiry_list(item)
                 expiry=next((x for x in sorted(exps) if x>=now.date().isoformat()),None)
                 if not expiry:continue
                 p=options.option_plan(self.broker.option_chain(item,expiry),idx['symbol'],idx['bias'],expiry,now)
@@ -400,17 +406,22 @@ class InsightsService:
                              instrument_id=p['security_id'],
                              segment='NSE_FNO' if _norm(idx['symbol'])!='SENSEX' else 'BSE_FNO',
                              instrument_type='OPTIDX',quote_freshness='NOT VERIFIED',
-                             research_only=True)
+                             research_only=True,mtf={'5m':idx['bias'],'15m':expected,'60m':expected},
+                             order_flow_proxy='OPTION CHAIN OI / PCR — POSITIONING ONLY',
+                             data_asof=idx.get('asof'))
                     signals.append(p)
                     # Never journal a hypothetical premium price as an observed signal.
             except (ValueError,BrokerUnavailable,KeyError):continue
         self._update('index-options',dict(signals=signals,status='RESEARCH ONLY — PREMIUM BACKTEST NEEDED' if signals else 'SCAN COMPLETE — NO QUALIFIED INDEX OPTION CONTRACTS',
-              scanned=len(indices),qualified=len(signals),note='Requires supported expiry/option chain and verified option premium; no trades placed'),now)
+              scanned=len(indices),qualified=len(signals),mtf='5m+15m+60m',
+              note='Index direction requires 5m/15m/60m confirmation. Option OI/PCR are positioning proxies; premium age is unverified; no trades placed'),now)
         return signals
 
     def scan_fo(self,now):
         signals=[];unavailable=0
-        for item in self._stock_list()[:10]:
+        selected=(list(self._shortlist) if self._shortlist_date==now.date().isoformat()
+                  else [])
+        for item in selected[:10]:
             future=item.get('future')
             if not future:unavailable+=1;continue
             try:
@@ -420,6 +431,10 @@ class InsightsService:
                     continue
                 s=futures.buildup(f,item['symbol'],now)
                 if not s:continue
+                h15=self.broker.history(item,now,minutes=15,lookback_days=12)
+                h60=self.broker.history(item,now,minutes=60,lookback_days=30)
+                expected='UP' if s['direction']=='CE' else 'DOWN'
+                if advanced_smc.trend(h15)!=expected or advanced_smc.trend(h60)!=expected:continue
                 exps=self.broker.expiry_list(item)
                 expiry=next((x for x in sorted(exps) if x>now.date().isoformat()),None)
                 if not expiry:continue
@@ -430,12 +445,16 @@ class InsightsService:
                    reasons=s['reasons']+plan['reasons'],backtest_status='UNVALIDATED',
                    status='HYPOTHETICAL — OPTION QUOTE AGE NOT VERIFIED',
                    instrument_id=plan['security_id'],segment='NSE_FNO',
-                   instrument_type='OPTSTK',quote_freshness='NOT VERIFIED',research_only=True)
+                   instrument_type='OPTSTK',quote_freshness='NOT VERIFIED',
+                   research_only=True,mtf={'15m':expected,'60m':expected},
+                   order_flow_proxy='FUTURES OI BUILDUP + CHAIN OI; NOT TRADE DELTA')
                 # No journal record: option entry premiums are not timestamp-verified.
                 signals.append(plan)
             except (BrokerUnavailable,ValueError,KeyError):unavailable+=1
         self._update('fo-stocks',dict(signals=signals,status='RESEARCH ONLY — option premium backtest required' if signals else 'SCAN COMPLETE — NO QUALIFIED FUTURES/OI SETUPS',
-              scanned=len(self._stock_list()[:10]),unavailable_count=unavailable,qualified=len(signals),note='Futures OI and valid option chain are mandatory; no invented premium'),now)
+              scanned=len(selected[:10]),shortlisted=len(selected),
+              unavailable_count=unavailable,qualified=len(signals),mtf='15m+60m+Futures OI',
+              note='Only discovered stocks are checked. Futures OI and valid option chain mandatory; option premium is hypothetical'),now)
         return signals
 
     def reconcile_outcomes(self,now):
