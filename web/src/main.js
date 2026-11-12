@@ -28,7 +28,7 @@ function Signals({items=[],empty='No validated signals available.'}){
    (s.warnings||[]).length?e('p',{className:'small loss'},s.warnings.join(' · ')):null,
    e('details',null,e('summary',null,'Why this candidate?'),e('ul',null,...(s.reasons||['Awaiting qualifying rules']).map((v,j)=>e('li',{key:j},v)))))));
 }
-function PriceChart({candles=[]}){
+function PriceChart({candles=[],fib=null}){
  const ref=useRef(null);
  useEffect(()=>{
   if(!ref.current||!candles.length)return;
@@ -37,10 +37,16 @@ function PriceChart({candles=[]}){
    grid:{vertLines:{visible:false},horzLines:{color:'#233349'}}});
   const series=chart.addSeries(CandlestickSeries,{upColor:'#41cba5',downColor:'#ef6576',borderVisible:false,wickUpColor:'#41cba5',wickDownColor:'#ef6576'});
   series.setData(candles.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));
+  if(fib)for(const level of ['0','0.44','0.5','1']){
+    const v=Number(fib[level]);
+    if(!Number.isFinite(v)||v<=0)continue;
+    series.createPriceLine({price:v,color:level==='0.44'?'#eeb95f':level==='0.5'?'#77adfa':level==='1'?'#62dbb8':'#ff8b9b',
+      lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Fib '+level});
+  }
   chart.timeScale().fitContent();
   const obs=new ResizeObserver(()=>chart.applyOptions({width:ref.current?.clientWidth||640}));obs.observe(ref.current);
   return()=>{obs.disconnect();chart.remove();};
- },[candles]);
+ },[candles,fib]);
  return candles.length?e('div',{className:'chart',ref}):e('p',{className:'muted'},'Price candles not available from Dhan.');
 }
 function OiChart({strikes=[]}){
@@ -143,6 +149,8 @@ function ReadinessPanel(){
 
 
 function FibOptionSetups({items=[]}){
+ const [active,setActive]=useState(0);
+ const selected=items[Math.max(0,Math.min(active,items.length-1))]||null;
  const heads=['Spot symbol','Strategy','State','Side','0','0.44','0.50','1','Spot entry','Spot stop','Spot target','OI'];
  const rows=items.map((x,i)=>{
    const fib=x.fib||{};
@@ -169,6 +177,14 @@ function FibOptionSetups({items=[]}){
     e('p',{className:'small muted'},'Fib levels and entry/stop/targets refer to the spot or cash underlying, NOT option premiums. Requires completed reference candles and 5m confirmations. Missing or contradictory OI blocks verified status.'),
     items.length?e('div',{className:'tablewrap'},table):
       e('div',{className:'empty'},'No Fib reference setups or watch states yet.')),
+  selected?e(Section,{title:'Spot / cash 5-minute candlesticks with Fib 0, 0.44, 0.5, 1'},
+    e('label',{className:'small muted'},'Reference study: ',
+      e('select',{value:Math.max(0,Math.min(active,items.length-1)),
+          onChange:ev=>setActive(Number(ev.target.value))},
+         ...items.map((x,i)=>e('option',{value:i,key:i},(x.underlying||'Spot')+' · '+x.strategy)))),
+    e('p',{className:'small muted'},'Fib lines are drawn on the underlying SPOT/CASH 5m chart; these are not option premium entry or stop prices.'),
+    e(PriceChart,{candles:selected.spot_candles||[],fib:selected.fib||null})
+   ):null,
   items.length?e(Section,{title:'Fib / SMC evidence and no-trade explanations'},...explanations):null);
 }
 function IntradayTopTen({items=[]}){
