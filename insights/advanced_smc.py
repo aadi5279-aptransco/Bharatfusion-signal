@@ -85,8 +85,15 @@ def rank_early(frame, now):
     down+=min(35,max(0,(m['rvol']-1)*20))
     up+=int(m['bos_up'])*15+int(m['fvg_up'])*10
     down+=int(m['bos_down'])*15+int(m['fvg_down'])*10
+    # Early watchlist direction uses *session return* even without a
+    # confirmed breakout. Signal generation remains strict (>=2x volume,
+    # structural break, 15m/60m trend and indicator agreement).
+    day=frame[frame.index.date==pd.Timestamp(now).date()]
+    if day.empty or float(day.open.iloc[0])<=0:return None
+    session_pct=100*(m['close']/float(day.open.iloc[0])-1)
     return dict(up_score=round(up,1),down_score=round(down,1),
-        rvol=m['rvol'],close=m['close'],up_breakout=m['up_breakout'],
+        rvol=m['rvol'],close=m['close'],session_change_pct=round(session_pct,3),
+        up_breakout=m['up_breakout'],
         down_breakdown=m['down_breakdown'],data_asof=m['data_asof'])
 
 
