@@ -718,10 +718,26 @@ class InsightsService:
     def run_due(self,now=None):
         now=now or datetime.now(IST)
         calendar=_holiday_set()
-        if not is_market_session(now,calendar):
+        local=now.astimezone(IST)
+        after_close=(calendar is not None and local.weekday()<5
+                     and local.date().isoformat() not in calendar
+                     and (15,40)<=(local.hour,local.minute)<=(18,0))
+        if not is_market_session(now,calendar) and not after_close:
             return dict(status='BLOCKED — holiday calendar missing, weekend or outside trading hours')
         if not self._job_lock.acquire(blocking=False):
             return dict(status='SCAN ALREADY RUNNING')
+        if after_close:
+            try:
+                key=(local.date().isoformat(),'longterm-daily')
+                if key in self._done:return dict(status='DAILY LONGTERM ALREADY COMPLETE')
+                result=self.scan_longterm(local)
+                self._done.add(key)
+                return dict(status='DAILY LONGTERM COMPLETE',**result)
+            except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
+                with self._lock:self._last_error='longterm: '+str(exc)[:160]
+                return dict(status='DAILY LONGTERM UNAVAILABLE')
+            finally:
+                self._job_lock.release()
         completed=[]
         try:
             date=now.date().isoformat()
