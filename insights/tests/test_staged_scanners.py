@@ -63,7 +63,9 @@ class StagedScannerTests(unittest.TestCase):
             s._snapshots['dashboard']=dict(indices=[context],sectors=[sector])
             with patch('insights.service._sector_map',return_value={'ALPHA':'IT'}),\
                  patch('insights.service.recent_frame',return_value=True),\
-                 patch('insights.service.advanced_smc.signal',return_value=None):
+                 patch('insights.service.advanced_smc.signal',return_value=None),\
+                 patch('insights.service.advanced_smc.structure',
+                     return_value={'available':True,'rvol':2.4,'up_breakout':True,'down_breakdown':False}):
                 output=s.scan_intraday(datetime(2026,11,11,10,5,tzinfo=IST))
             self.assertEqual(output['scanned'],1)
             self.assertEqual(output['data_assessed'],1)
