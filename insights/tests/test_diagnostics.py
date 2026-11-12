@@ -51,6 +51,18 @@ class ScannerReadinessTests(unittest.TestCase):
    broker=FakeBroker();service=InsightsService(broker,path)
    self.assertIn('BLOCKED',service.run_due(datetime(2026,11,10,10,0,tzinfo=IST))['status'])
    self.assertEqual(broker.calls,[])
+ def test_waiting_shortlist_has_zero_counts_without_broker_requests(self):
+  with tempfile.TemporaryDirectory() as path:
+   broker=FakeBroker();service=InsightsService(broker,path)
+   r=service.scan_intraday(datetime(2026,11,11,9,55,tzinfo=IST))
+   self.assertEqual(r['data_assessed'],0)
+   self.assertEqual(r['scanned'],0)
+   self.assertEqual(r['signals'],[])
+   self.assertEqual(r['buy_signals'],[])
+   self.assertEqual(r['sell_signals'],[])
+   self.assertFalse(r['shortlist_finalized'])
+   self.assertIn('WAITING FOR FINAL 10:00 SHORTLIST',r['status'])
+   self.assertEqual(broker.calls,[])
  def test_missing_index_context_is_diagnostic_not_signal(self):
   with tempfile.TemporaryDirectory() as path:
    service=InsightsService(FakeBroker(),path)
