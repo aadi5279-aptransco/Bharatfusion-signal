@@ -56,20 +56,16 @@ class StagedScannerTests(unittest.TestCase):
             s._shortlist_date='2026-11-11'
             s._shortlist_finalized=True
             s._shortlist=[dict(kind='stock',symbol='ALPHA',ticker='',segment='NSE_EQ',id='101',instrument='EQUITY')]
-            context=dict(symbol='NIFTY',bias='Uptrend',session_date='2026-11-11',
-                asof='2026-11-11T10:00:00+05:30',session_change=0.3)
-            sector=dict(sector='IT',session_date='2026-11-11',
-                asof='2026-11-11T10:00:00+05:30',session_change=0.1,bias='Uptrend')
-            s._snapshots['dashboard']=dict(indices=[context],sectors=[sector])
-            with patch('insights.service._sector_map',return_value={'ALPHA':'IT'}),\
-                 patch('insights.service.recent_frame',return_value=True),\
-                 patch('insights.service.advanced_smc.signal',return_value=None),\
-                 patch('insights.service.advanced_smc.structure',
-                     return_value={'available':True,'rvol':2.4,'up_breakout':True,'down_breakdown':False}):
+            # Fully completed recent 5m data is needed, but this test
+            # deliberately returns no qualifying DAILY query; no 15m calls.
+            with patch('insights.service.recent_frame',return_value=True),\
+                 patch('insights.service.momentum_query.daily_gate',return_value=None):
+                s._intraday_daily_cache[('2026-11-11','NSE_EQ','101')]=pd.DataFrame(
+                    {'close':[100.]*25},index=pd.date_range('2026-10-01',periods=25,freq='B',tz=IST))
                 output=s.scan_intraday(datetime(2026,11,11,10,5,tzinfo=IST))
             self.assertEqual(output['scanned'],1)
             self.assertEqual(output['data_assessed'],1)
-            self.assertEqual(len(self.broker.history_symbols),3)
+            self.assertEqual(len(self.broker.history_symbols),1)
             self.assertEqual(set(self.broker.history_symbols),{'ALPHA'})
             self.assertEqual(output['buy_signals'],[])
             self.assertEqual(output['sell_signals'],[])
