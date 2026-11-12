@@ -12,6 +12,7 @@ from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
+from insights.strategies import swing,multibagger
 
 DISCLAIMER='Rule-based research, not investment advice. Signals are not guaranteed; trading can cause significant losses. No orders are placed.'
 
@@ -48,7 +49,9 @@ class InsightsService:
           'intraday':{'signals':[],'buy_signals':[],'sell_signals':[],'status':'WAITING FOR 09:45 SHORTLIST'},
           'btst':{'signals':[],'status':'WAITING FOR 15:00 IST SCAN'},
           'index-options':{'signals':[],'status':'WAITING FOR OPTION CHAIN'},
-          'fo-stocks':{'signals':[],'status':'WAITING FOR FUTURES OI'}}
+          'fo-stocks':{'signals':[],'status':'WAITING FOR FUTURES OI'},
+          'swing-trades':{'signals':[],'status':'WAITING FOR COMPLETED DAILY SCAN'},
+          'multibagger':{'candidates':[],'status':'WAITING FOR COMPLETED DAILY SCAN'}}
         self._done=set();self._thread=None;self._stop=threading.Event()
         self._shortlist_date=None
         self._shortlist_finalized=False
@@ -639,6 +642,78 @@ class InsightsService:
                         if self.journal.outcome(record['id'],'EXPIRED',str(after.index[74]),float(last.close)):updated+=1
             except (BrokerUnavailable,ValueError,TypeError,KeyError):continue
         return updated
+
+    @staticmethod
+    def _dated_research_bundle(environment_name):
+        """Read only explicitly configured attributable local datasets."""
+        name=os.getenv(environment_name,'')
+        if not name:return None
+        try:
+            with Path(name).open(encoding='utf-8') as stream:
+                source=json.load(stream)
+            return source if isinstance(source,dict) else None
+        except (OSError,ValueError,TypeError):
+            return None
+
+    def scan_longterm(self,now):
+        """Daily off-hours research scan, never a 5-minute intraday job.
+
+        Separate from the 10:00 locked shortlist. Includes configured F&O
+        universe, and if a watchlist is provided, respects its explicit limit.
+        """
+        now=now.astimezone(IST)
+        universe=self._stock_list()
+        fundamentals=self._dated_research_bundle('INSIGHTS_FUNDAMENTALS_FILE')
+        surveillance=self._dated_research_bundle('INSIGHTS_SURVEILLANCE_FILE')
+        # NIFTY 500 relative strength ranks must be independently sourced.
+        rank_source=self._dated_research_bundle('INSIGHTS_RS_RANK_FILE')
+        rank_rows=rank_source.get('ranks',{}) if isinstance(rank_source,dict) else {}
+        rank_date=rank_source.get('asof') if isinstance(rank_source,dict) else None
+        if rank_date:
+            try:
+                age=(now.date()-datetime.strptime(rank_date,'%Y-%m-%d').date()).days
+                if age<0 or age>45:rank_rows={}
+            except (ValueError,TypeError):rank_rows={}
+        swing_rows=[];multi_rows=[]
+        failures=0;insufficient=0
+        for item in universe:
+            try:
+                # At least 20 fully completed months for EMA20 and 300
+                # completed sessions for 200-day/52w templates.
+                daily=self.broker.daily(item,now,days=1300)
+                if daily is None or len(daily)<260:
+                    insufficient+=1
+                    continue
+                swing_rows.extend(swing.scan(daily,item['symbol'],now))
+                rank=rank_rows.get(item['symbol']) if isinstance(rank_rows,dict) else None
+                result=multibagger.evaluate(
+                    daily,item['symbol'],daily.index[-1].date().isoformat(),
+                    fundamentals=fundamentals,surveillance=surveillance,rs_rank=rank)
+                if result is not None:multi_rows.append(result)
+            except (BrokerUnavailable,ValueError,KeyError,TypeError,IndexError):
+                failures+=1
+        swing_rows.sort(key=lambda row:(
+            -row['risk_reward'],-row['trend_strength'],
+            -(row['volume_ratio'] if row['volume_ratio'] is not None else 0),
+            row['symbol']))
+        multi_rows.sort(key=lambda row:(-row['score'],-row['verified_count'],row['symbol']))
+        meta=dict(universe=len(universe),missing_or_short_history=insufficient,
+                  unavailable_count=failures,asof=now.isoformat(),
+                  note='Completed daily candles only; no live orders or fill assumptions.')
+        self._update('swing-trades',dict(
+            signals=swing_rows[:100],
+            status='DAILY SWING RESEARCH COMPLETE',
+            **meta),now)
+        self._update('multibagger',dict(
+            candidates=multi_rows[:100],
+            status='COMPLETED-CANDLE MULTIBAGGER RESEARCH; NOT A RETURN FORECAST',
+            fundamentals_source='LOCAL DATED ATTRIBUTABLE FILE' if fundamentals else 'UNVERIFIED',
+            surveillance_source='LOCAL DATED ATTRIBUTABLE FILE' if surveillance else 'UNVERIFIED',
+            rs_rank_source='LOCAL DATED REFERENCE' if rank_rows else 'UNVERIFIED',
+            available_eligibility=sum(row['eligible'] for row in multi_rows),
+            **meta),now)
+        return dict(swing_count=len(swing_rows),multibagger_count=len(multi_rows),
+                    unavailable_count=failures,insufficient_history=insufficient)
 
     def run_due(self,now=None):
         now=now or datetime.now(IST)
