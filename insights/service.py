@@ -675,8 +675,8 @@ class InsightsService:
         try:maximum=max(1,min(500,int(os.getenv('INSIGHTS_LONGTERM_MAX_SYMBOLS','80'))))
         except (ValueError,TypeError):maximum=80
         fundamentals=self._dated_research_bundle('INSIGHTS_FUNDAMENTALS_FILE')
-        funding_names={_norm(k) for k in (fundamentals.get('symbols') or {})}
-            if isinstance(fundamentals,dict) else set()
+        funding_names=({_norm(k) for k in (fundamentals.get('symbols') or {})}
+                       if isinstance(fundamentals,dict) else set())
         priority=lambda item:(
             _norm(item['symbol']) not in funding_names,
             _norm(item['symbol']),str(item['id']))
