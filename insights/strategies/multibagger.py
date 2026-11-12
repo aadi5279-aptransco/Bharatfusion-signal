@@ -27,11 +27,11 @@ FUNDAMENTALS={
  'profit_cagr_3y':('Profit CAGR over three years >20%',lambda x:x>20),
  'quarter_profit_yoy':('Latest quarterly profit YoY >25%',lambda x:x>25),
  'roce':('ROCE >18%',lambda x:x>18),
- 'debt_equity':('Debt/equity <0.5',lambda x:x<.5),
- 'promoter_holding':('Promoter holding >50%',lambda x:x>50),
- 'promoter_pledging':('Promoter pledging <5%',lambda x:x<5),
+ 'debt_equity':('Debt/equity <0.5',lambda x:0<=x<.5),
+ 'promoter_holding':('Promoter holding >50%',lambda x:50<x<=100),
+ 'promoter_pledging':('Promoter pledging <5%',lambda x:0<=x<5),
  'operating_cash_flow':('Operating cash flow positive',lambda x:x>0),
- 'peg':('PEG <1.5',lambda x:x<1.5),
+ 'peg':('PEG <1.5',lambda x:0<x<1.5),
 }
 GUARD_KEYS=('listed_exchange','market_cap_cr','listing_date','asm','gsm',
             'frequent_circuit_locks')
