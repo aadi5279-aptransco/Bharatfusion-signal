@@ -213,9 +213,12 @@ exchange/surveillance flags, and NIFTY 500 relative-strength percentiles
 are **not included in standard Dhan OHLCV** and must be supplied with dated
 provenance. Missing any of those eligibility checks yields **UNVERIFIED**.
 Verified failure yields **BLOCKED**. The tab allows viewing unverified and
-blocked rows to see which information is missing. This is not a complete
-NSE/BSE survey if the configured Dhan instrument master contains only F&O
-underlyings.
+blocked rows to see which information is missing. Long-term scanners use a separate NSE/BSE CASH equity selection from the
+existing detailed official Dhan master (instead of the F&O-only subset),
+subject to the `INSIGHTS_LONGTERM_MAX_SYMBOLS` cap, source coverage,
+and any configured watchlist. With the default 80-stock limit this is
+**not** an exhaustive NSE/BSE listing survey. The intraday F&O scanner
+continues using its original narrow contract-aware master.
 
 **Scheduling and load:** The regular background scanner runs these two
 long-term research screens **once after 15:40 IST** on configured exchange
