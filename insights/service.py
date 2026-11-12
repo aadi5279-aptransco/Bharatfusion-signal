@@ -569,6 +569,9 @@ class InsightsService:
             return [dict(x,trade_status='WATCH_ONLY — NO CONFIRMED FIB/SMC',
                          underlying=item['symbol']) for x in setups]
         future=item.get('future')
+        if not future and item.get('kind')=='index' and hasattr(self.broker,'index_future'):
+            try:future=self.broker.index_future(item,now)
+            except (BrokerUnavailable,ValueError,KeyError,TypeError):future=None
         fut=None
         if future:
             try:fut=self.broker.history(future,now,minutes=15,lookback_days=8,oi=True)
