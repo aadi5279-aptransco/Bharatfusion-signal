@@ -78,6 +78,24 @@ class LongtermStrategyTests(unittest.TestCase):
         self.assertEqual(x['eligibility_status'],'UNVERIFIED')
 
 
+class ResearchUniverseTests(unittest.TestCase):
+    def test_nse_and_bse_cash_shares_from_cached_dhan_master(self):
+        from insights.brokers.dhan import DhanReadOnly
+        master=pd.DataFrame([
+            dict(EXCH_ID='NSE',SEGMENT='E',INSTRUMENT='EQUITY',
+                 SECURITY_ID='101',SYMBOL_NAME='NSE_EXAMPLE',SERIES='EQ'),
+            dict(EXCH_ID='BSE',SEGMENT='E',INSTRUMENT='EQUITY',
+                 SECURITY_ID='202',SYMBOL_NAME='BSE_EXAMPLE',SERIES='A'),
+            dict(EXCH_ID='NSE',SEGMENT='D',INSTRUMENT='FUTSTK',
+                 SECURITY_ID='303',SYMBOL_NAME='EXAMPLE_FUT',SERIES=''),
+        ])
+        with patch('data._MASTER',master):
+            stocks=DhanReadOnly('dummy','dummy').longterm_instruments()
+        self.assertEqual(len(stocks),2)
+        self.assertEqual(set(x['segment'] for x in stocks),{'NSE_EQ','BSE_EQ'})
+        self.assertTrue(all(x['kind']=='stock' for x in stocks))
+
+
 class LongtermSchedulerTests(unittest.TestCase):
     def test_new_read_only_api_tabs(self):
         from insights.api import create_app
