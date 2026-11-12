@@ -60,8 +60,11 @@ def report(service,now=None,probe=False):
         if f.empty:raise ValueError('Empty Dhan history')
         if oi and ('oi' not in f.columns or f['oi'].dropna().empty):
             raise ValueError('Missing futures OI')
+        discarded=int(f.attrs.get('out_of_session_discarded',0))
         return dict(instrument=item['symbol'],completed_candles=len(f),
              last_candle=f.index[-1].isoformat(),
+             out_of_session_discarded=discarded,
+             session_check=f.attrs.get('session_check','NOT_APPLIED — DERIVATIVE OR TEST BROKER'),
              historical_only=(not is_market_session(now,cal) or f.index[-1].date()!=now.date()),
              enough_for_ema200=len(f)>=201,
              **({'oi_available':True} if oi else {}))
