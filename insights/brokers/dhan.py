@@ -263,6 +263,71 @@ class DhanReadOnly:
                 source='DHAN FIVE-LEVEL RESTING MARKET DEPTH — NOT TRADE DELTA')
         return results
 
+    def index_future(self,item,now=None):
+        """Map the nearest genuine FUTIDX by exact Dhan underlying ID.
+
+        No symbol-only guessing and never substitute index OHLC for futures OI.
+        The detailed master is needed and may not list a mapped contract.
+        """
+        import data as legacy_data
+        if getattr(legacy_data,'_MASTER',None) is None:
+            self.instruments()
+        raw=getattr(legacy_data,'_MASTER',None)
+        if raw is None:return None
+        need={'EXCH_ID','INSTRUMENT','SECURITY_ID','UNDERLYING_SECURITY_ID','SM_EXPIRY_DATE'}
+        if not need.issubset(raw.columns):return None
+        now=(now or datetime.now(IST)).astimezone(IST)
+        source=str(item.get('id','')).replace('.0','')
+        if not source:return None
+        cleaned=raw.UNDERLYING_SECURITY_ID.fillna('').astype(str).str.replace(r'\.0
+        """NSE/BSE listed cash equities from the existing official Dhan master.
+
+        This does not alter the narrower F&O universe. BSE listing inclusion
+        is not proof of surveillance status; later eligibility gates require
+        attributed ASM/GSM/circuit-list data.
+        """
+        import data as legacy_data
+        if getattr(legacy_data,'_MASTER',None) is None:
+            self.instruments()  # populates shared detailed instrument master
+        master=getattr(legacy_data,'_MASTER',None)
+        if master is None:
+            raise BrokerUnavailable('Detailed Dhan equity instrument master unavailable')
+        needed={'EXCH_ID','SEGMENT','INSTRUMENT','SECURITY_ID','SYMBOL_NAME','SERIES'}
+        if not needed.issubset(master.columns):
+            raise BrokerUnavailable('Unrecognized Dhan equity master columns')
+        mask=(master['EXCH_ID'].isin(['NSE','BSE'])
+              & (master['SEGMENT']=='E')
+              & (master['INSTRUMENT']=='EQUITY'))
+        subset=master.loc[mask,list(needed)].copy().fillna('')
+        # NSE regular EQ series; BSE cash series can differ.
+        subset=subset[((subset.EXCH_ID=='NSE')&(subset.SERIES=='EQ'))
+                      | ((subset.EXCH_ID=='BSE')&(subset.SERIES!=''))]
+        subset=subset[subset.SECURITY_ID.ne('') & subset.SYMBOL_NAME.ne('')]
+        subset=subset[~subset.SYMBOL_NAME.str.contains('TEST|DUMMY',case=False,regex=True)]
+        subset=subset.drop_duplicates(['EXCH_ID','SECURITY_ID'])
+        return [dict(symbol=row.SYMBOL_NAME,ticker='',id=row.SECURITY_ID,
+                     segment='NSE_EQ' if row.EXCH_ID=='NSE' else 'BSE_EQ',
+                     instrument='EQUITY',kind='stock',
+                     listed_exchange=row.EXCH_ID)
+                for row in subset.itertuples(index=False)]
+
+    def instruments(self):
+        # Official Dhan-hosted detailed master via pre-existing source parser.
+        from data import universe
+        return universe(reuse=True)
+,'',regex=True)
+        candidates=raw.loc[(raw.INSTRUMENT=='FUTIDX')&(cleaned==source)].copy()
+        if candidates.empty:return None
+        candidates['exp']=pd.to_datetime(candidates.SM_EXPIRY_DATE,errors='coerce',utc=True)
+        candidates=candidates[candidates['exp'].dt.date>=now.date()]
+        if candidates.empty:return None
+        row=candidates.sort_values('exp').iloc[0]
+        segment={'NSE':'NSE_FNO','BSE':'BSE_FNO'}.get(str(row.EXCH_ID))
+        if not segment:return None
+        return dict(id=str(row.SECURITY_ID),segment=segment,
+                    instrument='FUTIDX',expiry=row.exp.date().isoformat(),
+                    symbol=str(row.get('SYMBOL_NAME','INDEX-FUTIDX')))
+
     def longterm_instruments(self):
         """NSE/BSE listed cash equities from the existing official Dhan master.
 
