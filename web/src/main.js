@@ -141,6 +141,36 @@ function ReadinessPanel(){
    e('p',{className:'small muted'},'For a read-only Dhan data, option-chain and futures OI test, run CHECK_SCANNER_READINESS.bat from your application folder.')));
 }
 
+
+function FibOptionSetups({items=[]}){
+ const heads=['Spot symbol','Strategy','State','Side','0','0.44','0.50','1','Spot entry','Spot stop','Spot target','OI'];
+ const rows=items.map((x,i)=>{
+   const fib=x.fib||{};
+   const values=[x.underlying,x.strategy,x.trade_status||x.state||'WAITING',
+      x.side||'—',fib['0']??'—',fib['0.44']??'—',fib['0.5']??'—',fib['1']??'—',
+      x.spot_entry??'—',x.spot_sl??'—',x.spot_t1??'—',
+      (x.oi?.status||'UNAVAILABLE')+' / '+(x.futures_oi?.status||'UNAVAILABLE')];
+   return e('tr',{key:i},...values.map((v,j)=>e('td',{key:j},v)));
+ });
+ const table=e('table',{className:'research-table'},
+   e('thead',null,e('tr',null,...heads.map(k=>e('th',{key:k},k)))),
+   e('tbody',null,...rows));
+ const explanations=items.map((x,i)=>e('details',{className:'fib-evidence',key:i},
+   e('summary',null,(x.underlying||'Underlying')+' · '+x.strategy+' · '+(x.state||'WAITING')),
+   e('p',{className:'small muted'},x.reason||'No verified opportunity'),
+   e('p',{className:'small muted'},'No-trade zone: ',x.no_trade_zone||'—',
+       ' · Reference: ',x.reference?.interval||'—',' · Candle: ',x.reference?.color||'—'),
+   e('p',{className:'small muted'},'SMC: ',x.smc?.reason||'Not confirmed'),
+   e('p',{className:'small muted'},'Chain OI: ',x.oi?.reason||'Not verified',
+       ' · Futures: ',x.futures_oi?.reason||'Not verified'),
+   e('p',{className:'small muted'},'Option premium: ',x.premium_status||'UNVERIFIED')));
+ return e(React.Fragment,null,
+  e(Section,{title:'Additional 09:45 and 12:45 Fib + SMC + OI research'},
+    e('p',{className:'small muted'},'Fib levels and entry/stop/targets refer to the spot or cash underlying, NOT option premiums. Requires completed reference candles and 5m confirmations. Missing or contradictory OI blocks verified status.'),
+    items.length?e('div',{className:'tablewrap'},table):
+      e('div',{className:'empty'},'No Fib reference setups or watch states yet.')),
+  items.length?e(Section,{title:'Fib / SMC evidence and no-trade explanations'},...explanations):null);
+}
 function IntradayTopTen({items=[]}){
  const headers=['#','Symbol','Side','Rank','Entry trigger','Stop','T1','T2','Stop %','Daily RVOL','15m RVOL'];
  const rows=items.map((x,i)=>{
@@ -328,7 +358,10 @@ function App(){
      ['Index Options','F&O Stocks'].includes(active)?e(Notice,{warning:true},
        'Option premiums are hypothetical until quote timestamps, expiry and historical performance are independently verified. No trades are placed or recorded as executed.'):null,
      active==='Intraday'?e(IntradaySignals,{data}):
-     e(Section,{title:'Rule-based research candidates'},e(Signals,{items:data.signals||[],empty:data.status||'No qualifying signals. Missing inputs are never filled with invented values.'}))) :null,
+     e(React.Fragment,null,
+       ['Index Options','F&O Stocks'].includes(active)?e(FibOptionSetups,{items:data.fib_setups||[]}):null,
+       e(Section,{title:'Existing rule-based research candidates'},
+          e(Signals,{items:data.signals||[],empty:data.status||'No qualifying signals. Missing inputs are never filled with invented values.'})))) :null,
     active==='Track Record'?e(TrackRecord,{data}):null,
     e('div',{className:'footer'},'Powered by local Python Flask API · Dhan-sourced analytics only · No broker orders · Data and backtests may be incomplete'))));
 }
