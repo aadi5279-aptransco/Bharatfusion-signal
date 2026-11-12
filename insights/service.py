@@ -219,9 +219,13 @@ class InsightsService:
                 score=advanced_smc.rank_early(candles,now)
                 if score is None:continue
                 available+=1
-                if score['rvol']<1.2:continue
-                ranked_up.append((score['up_score'],score['rvol'],item,score))
-                ranked_down.append((score['down_score'],score['rvol'],item,score))
+                # 09:45 lists require directional range breaks and meaningful
+                # relative volume; a volume spike alone is not both BUY and SELL.
+                if score['rvol']<1.5:continue
+                if score['up_breakout']:
+                    ranked_up.append((score['up_score'],score['rvol'],item,score))
+                if score['down_breakdown']:
+                    ranked_down.append((score['down_score'],score['rvol'],item,score))
             except (BrokerUnavailable,ValueError,KeyError,TypeError):continue
         ranked_up.sort(key=lambda x:(x[0],x[1]),reverse=True)
         ranked_down.sort(key=lambda x:(x[0],x[1]),reverse=True)
