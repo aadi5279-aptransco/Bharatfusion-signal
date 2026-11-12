@@ -659,6 +659,26 @@ class InsightsService:
                         except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
                             with self._lock:self._last_error=f'intraday: {str(exc)[:160]}'
                     self._done.add(key)
+                # Re-evaluate option setups on every completed five-minute
+                # clock boundary after final discovery. No full stock-universe
+                # sweep; index list is fixed and F&O uses the locked shortlist.
+                # The common job lock serializes Dhan chain requests.
+                if minute>=10*60+5:
+                    for name,job in (
+                        ('index-options-monitor',self.scan_index_options),
+                        ('fo-stocks-monitor',self.scan_fo),
+                    ):
+                        key=(date,name,minute//5)
+                        if key in self._done:
+                            continue
+                        try:
+                            job(now)
+                            completed.append(name)
+                        except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
+                            with self._lock:
+                                self._last_error=f'{name}: {str(exc)[:160]}'
+                        else:
+                            self._done.add(key)
                 key=(date,'outcomes',minute//5)
                 if key not in self._done:
                     try:self.reconcile_outcomes(now)
