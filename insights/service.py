@@ -232,35 +232,53 @@ class InsightsService:
                 each=max(1,MAX_SYMBOLS//2)
                 for x in gainers[:each]+losers[:each]:
                     picks[str(x['id'])]=x
-                # Include known-mapped names for sector confirmation where
-                # possible; never invent a sector mapping.
-                for x in valid:
-                    if len(picks)>=MAX_SYMBOLS:break
-                    mapped=_sector_map()
-                    if _norm(x['symbol']) in mapped or _norm(x.get('ticker','')) in mapped:
-                        picks.setdefault(str(x['id']),x)
-                universe=list(picks.values())[:MAX_SYMBOLS]
+                # Reserve part of the deep-analysis universe for symbols
+                # with a verified sector mapping. Otherwise the strongest
+                # quote movers may all be ineligible for relative-strength gates.
+                mapped=_sector_map()
+                mapped_stocks=[x for x in valid if
+                    _norm(x['symbol']) in mapped or _norm(x.get('ticker','')) in mapped]
+                reserve=max(1,min(len(mapped_stocks),MAX_SYMBOLS//3))
+                for x in mapped_stocks[:reserve]:
+                    picks[str(x['id'])]=x
+                ranked=list(picks.values())
+                # If we exceeded the deep cap, keep the mapped reserve and the
+                # strongest movers rather than blindly trimming a dict.
+                if len(ranked)>MAX_SYMBOLS:
+                    ranked= mapped_stocks[:reserve]+[
+                        x for x in ranked if x not in mapped_stocks[:reserve]][:MAX_SYMBOLS-reserve]
+                universe=ranked[:MAX_SYMBOLS]
                 mode='BATCHED_DHAN_QUOTE_PRESELECTION'
         ranked_up=[];ranked_down=[];available=0
+        stale=0;missing_structure=0;errors=0
         for item in universe:
             try:
                 candles=self.broker.history(item,now,minutes=5)
-                if not recent_frame(candles,now,5,20):continue
+                if not recent_frame(candles,now,5,20):
+                    stale+=1
+                    continue
                 score=advanced_smc.rank_early(candles,now)
-                if score is None:continue
+                if score is None:
+                    missing_structure+=1
+                    continue
                 available+=1
-                # 09:45 lists require directional range breaks and meaningful
-                # relative volume; a volume spike alone is not both BUY and SELL.
-                if score['rvol']<1.5:continue
-                if score['up_breakout']:
-                    ranked_up.append((score['up_score'],score['rvol'],item,score))
-                if score['down_breakdown']:
-                    ranked_down.append((score['down_score'],score['rvol'],item,score))
-            except (BrokerUnavailable,ValueError,KeyError,TypeError):continue
+                # Discovery is a *watchlist* rather than a signal: favor
+                # directional strength even before the breakout itself.
+                # Strict >=2x RVOL/BOS/MTF are reserved for subsequent signals.
+                change=score.get('session_change_pct',0)
+                score['session_change_pct']=change
+                if change>0 or score['up_breakout']:
+                    ranked_up.append((score['up_score']+max(0,change)*8,
+                                      score['rvol'],item,score))
+                if change<0 or score['down_breakdown']:
+                    ranked_down.append((score['down_score']+max(0,-change)*8,
+                                        score['rvol'],item,score))
+            except (BrokerUnavailable,ValueError,KeyError,TypeError):
+                errors+=1
         ranked_up.sort(key=lambda x:(x[0],x[1]),reverse=True)
         ranked_down.sort(key=lambda x:(x[0],x[1]),reverse=True)
-        self._shortlist_up=[x[2] for x in ranked_up[:8] if x[0]>=35]
-        self._shortlist_down=[x[2] for x in ranked_down[:8] if x[0]>=35]
+        self._shortlist_up=[x[2] for x in ranked_up[:8]]
+        self._shortlist_down=[x[2] for x in ranked_down[:8]]
         chosen={str(x['id']):x for x in self._shortlist_up+self._shortlist_down}
         self._shortlist=list(chosen.values())
         self._discovery_scanned=len(universe)
@@ -268,8 +286,10 @@ class InsightsService:
         self._breadth_quotes=breadth_count
         self._shortlist_finalized=bool(final)
         preview=lambda rows,side:[dict(symbol=x[2]['symbol'],rvol=x[3]['rvol'],
-             ranking_score=x[0],direction=side,data_asof=x[3]['data_asof'],
-             status='EARLY WATCH — NOT A TRADE') for x in rows[:8] if x[0]>=35]
+             ranking_score=round(x[0],1),direction=side,data_asof=x[3]['data_asof'],
+             session_change_pct=x[3]['session_change_pct'],
+             confirmed_break=bool(x[3]['up_breakout'] if side=='BUY' else x[3]['down_breakdown']),
+             status='EARLY WATCH — NOT A TRADE') for x in rows[:8]]
         self._preview_buy=preview(ranked_up,'BUY')
         self._preview_sell=preview(ranked_down,'SELL')
         data=dict(status='FINAL SHORTLIST LOCKED — AWAITING 5m/15m/60m CONFIRMATION'
@@ -279,9 +299,13 @@ class InsightsService:
                   preview_sell=list(self._preview_sell),
                   scanned=len(universe),data_assessed=available,
                   discovery_mode=mode,breadth_quotes=breadth_count,
+                  stale_data=stale,missing_structure=missing_structure,
+                  unavailable_count=errors,
                   shortlist_size=len(self._shortlist),shortlist_finalized=bool(final),
                   shortlist_symbols=[x['symbol'] for x in self._shortlist],
-                  note='At most two broad discovery passes per session. Later scans monitor only locked symbols; 09:45 rankings are not executable calls.')
+                  note='Discovery ranks directional watch candidates, not confirmed breakouts. '+ 
+                       'Dhan missing/stale bars are reported separately. No executable calls at 09:45. '+ 
+                       'Later scans monitor only locked symbols.')
         self._update('intraday',data,now)
         return data
 
