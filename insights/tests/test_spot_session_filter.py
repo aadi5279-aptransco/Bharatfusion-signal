@@ -8,7 +8,10 @@ from insights.strategies import fib_smc
 
 def cash_frame():
     idx=pd.date_range('2026-11-12 09:15',periods=75,freq='5min',tz=IST)
-    extra=pd.DatetimeIndex(['2026-11-12T18:15:00+05:30'])
+    # Normalize the extra bar to the same named IST timezone. A fixed
+    # +05:30 Timestamp mixed with ZoneInfo(Asia/Kolkata) can make pandas
+    # return a generic object Index instead of a DatetimeIndex.
+    extra=pd.DatetimeIndex(['2026-11-12T18:15:00+05:30']).tz_convert(IST)
     index=idx.append(extra)
     return pd.DataFrame({
         'open':[100.]*75+[999.], 'high':[101.]*75+[1000.],
@@ -30,6 +33,22 @@ class SpotTradingHoursTests(unittest.TestCase):
             {'segment':'NSE_EQ','kind':'stock','symbol':'TEST'},5)
         self.assertEqual(len(f),75)
         self.assertEqual(f.attrs['out_of_session_discarded'],1)
+
+    def test_timezone_naive_cash_frame_fails_closed(self):
+        f=cash_frame()
+        f.index=f.index.tz_localize(None)
+        from insights.brokers.dhan import BrokerUnavailable
+        with self.assertRaises(BrokerUnavailable):
+            _regular_cash_session_bars(f,{'segment':'IDX_I','kind':'index'},5)
+
+    def test_mixed_timezone_aware_index_is_converted_without_clock_shift(self):
+        f=cash_frame()
+        fixed=pd.DatetimeIndex(['2026-11-12T18:15:00+05:30'])
+        f.index=pd.DatetimeIndex(f.index[:-1]).append(fixed)
+        clean=_regular_cash_session_bars(f,{'segment':'IDX_I','kind':'index'},5)
+        self.assertEqual(len(clean),75)
+        self.assertEqual(clean.index[0].strftime('%H:%M'),'09:15')
+        self.assertEqual(clean.index[-1].strftime('%H:%M'),'15:25')
 
     def test_futures_oi_not_filtered_by_cash_hours(self):
         f=_regular_cash_session_bars(cash_frame(),
