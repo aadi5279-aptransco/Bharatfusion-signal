@@ -66,7 +66,7 @@ class QualityTests(unittest.TestCase):
             result=service.scan_intraday(self.now)
             self.assertEqual(result['data_assessed'],0)
             self.assertEqual(result['signals'],[])
-            self.assertIn('NO VERIFIED',result['status'])
+            self.assertIn('MOMENTUM QUERY SCAN COMPLETE',result['status'])
             self.assertEqual(service.journal.signals(),[])
 
 
