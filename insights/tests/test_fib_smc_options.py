@@ -61,6 +61,15 @@ class FibRulesTests(unittest.TestCase):
                               chain,{'status':'CONFIRMED'})
         self.assertIn('SKIP',result['trade_status'])
 
+    def test_previous_session_futures_oi_never_confirms(self):
+        idx=pd.DatetimeIndex(['2026-11-11T15:00:00+05:30',
+                              '2026-11-11T15:15:00+05:30'])
+        candles=pd.DataFrame(dict(close=[100,101],oi=[1000,1100]),index=idx)
+        evidence=fib_oi.futures_evidence(
+            candles,'CE',datetime(2026,11,12,10,15,tzinfo=IST))
+        self.assertEqual(evidence['status'],'UNAVAILABLE')
+        self.assertIn('stale',evidence['reason'].lower())
+
     def test_oi_agreement_requires_futures_and_chain(self):
         chain=dict(oc={
           '100':{'ce':{'oi':50,'previous_oi':100},'pe':{'oi':200,'previous_oi':100}},
