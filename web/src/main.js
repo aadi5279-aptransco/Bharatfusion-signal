@@ -158,6 +158,11 @@ function IntradaySignals({data}){
     e(Signals,{items:signals,empty:!data.shortlist_finalized?
       'Awaiting 09:45 preliminary and 10:00 finalized watchlist. Early rankings are NOT executable trades.':
       'No qualifying '+(isBuy?'breakout BUY':'breakdown SELL')+' signals on the locked shortlist.'})),
+   data.shortlist_finalized?e(Section,{title:'10:00 locked shortlist — monitored without broad rescans'},
+       (data.shortlist_symbols||[]).length?
+       e('div',{className:'shortlist-chips'},(data.shortlist_symbols||[]).map((name,i)=>
+         e('span',{key:i,className:'shortlist-chip'},name))):
+       e('p',{className:'small muted'},'No eligible stocks were shortlisted. This is not a trade signal.')):null,
    preview.length?e(Section,{title:isBuy?'Early BUY watchlist — NOT signals':'Early SELL watchlist — NOT signals'},
      e('div',{className:'tablewrap'},e('table',null,
        e('thead',null,e('tr',null,...['Symbol','Rank score','RVOL','Data as of','Status'].map(k=>e('th',{key:k},k)))),
@@ -217,7 +222,7 @@ function App(){
     active==='Analyse'?e(Analyse,{data,onSearch,busy}):null,
     ['Intraday','BTST','Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
      e(ReadinessPanel),
-     e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'Scheduled 10:15 IST':active==='BTST'?'Scheduled 15:00 IST':'Licensed Dhan market data'}),
+     e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'09:45 Preview · 10:00 Final · 5m Follow-up':active==='BTST'?'Scheduled 15:00 IST':'Licensed Dhan market data'}),
        e(Tile,{title:'CANDIDATES',value:(data.signals||[]).length,sub:active==='Intraday'?`BUY ${data.qualified_buy||0} · SELL ${data.qualified_sell||0}`:''}),e(Tile,{title:'STATUS',value:data.status||'Waiting'}),e(Tile,{title:'LAST SCAN',value:data.updated_at||'Not yet run'})),
      data.scanned!=null?e('p',{className:'small muted'},
        'Deep universe: ',data.scanned,' · Broad quote coverage: ',data.breadth_quotes??'—',
