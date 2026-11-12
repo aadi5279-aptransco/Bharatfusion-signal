@@ -565,6 +565,15 @@ class InsightsService:
             if not recent_frame(five,now,5,20):return []
         except (BrokerUnavailable,ValueError,KeyError,TypeError):return []
         setups=[fib_smc.evaluate(five,now,key) for key in ('0945','1245')]
+        # A compact SPOT/CASH candlestick chart, never a futures/options
+        # proxy. Return completed current-session bars only.
+        chart=five[(five.index.date==now.date())&
+                   (five.index+pd.Timedelta(minutes=5)<=pd.Timestamp(now))]
+        chart_candles=[dict(time=int(t.timestamp()),open=round(float(r.open),2),
+                            high=round(float(r.high),2),low=round(float(r.low),2),
+                            close=round(float(r.close),2))
+                       for t,r in chart.tail(80).iterrows()]
+        for setup in setups:setup['spot_candles']=chart_candles
         if not any(x.get('state')=='STRUCTURE_READY' for x in setups):
             return [dict(x,trade_status='WATCH_ONLY — NO CONFIRMED FIB/SMC',
                          underlying=item['symbol']) for x in setups]
