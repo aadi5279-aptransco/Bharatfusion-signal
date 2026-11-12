@@ -455,6 +455,12 @@ class InsightsService:
             try:
                 item=self._lookup(idx['symbol'])
                 if item is None:continue
+                five=self.broker.history(item,now,minutes=5,lookback_days=8)
+                if not recent_frame(five,now,5,20):continue
+                smc=advanced_smc.structure(five,now)
+                if not smc.get('available') or smc['rvol']<1.5:continue
+                if idx['bias']=='Uptrend' and not smc['up_breakout']:continue
+                if idx['bias']=='Downtrend' and not smc['down_breakdown']:continue
                 h15=self.broker.history(item,now,minutes=15,lookback_days=12)
                 h60=self.broker.history(item,now,minutes=60,lookback_days=30)
                 expected='UP' if idx['bias']=='Uptrend' else 'DOWN'
@@ -471,7 +477,10 @@ class InsightsService:
                              instrument_type='OPTIDX',quote_freshness='NOT VERIFIED',
                              research_only=True,mtf={'5m':idx['bias'],'15m':expected,'60m':expected},
                              order_flow_proxy='OPTION CHAIN OI / PCR — POSITIONING ONLY',
-                             data_asof=idx.get('asof'))
+                             smc=dict(bos_up=smc['bos_up'],bos_down=smc['bos_down'],
+                                 choch_up=smc['choch_up'],choch_down=smc['choch_down'],
+                                 fvg_up=smc['fvg_up'],fvg_down=smc['fvg_down'],
+                                 rvol=smc['rvol']),data_asof=idx.get('asof'))
                     signals.append(p)
                     # Never journal a hypothetical premium price as an observed signal.
             except (ValueError,BrokerUnavailable,KeyError):continue
@@ -494,6 +503,12 @@ class InsightsService:
                     continue
                 s=futures.buildup(f,item['symbol'],now)
                 if not s:continue
+                five=self.broker.history(item,now,minutes=5,lookback_days=8)
+                if not recent_frame(five,now,5,20):continue
+                smc=advanced_smc.structure(five,now)
+                if not smc.get('available') or smc['rvol']<1.5:continue
+                if s['direction']=='CE' and not smc['up_breakout']:continue
+                if s['direction']=='PE' and not smc['down_breakdown']:continue
                 h15=self.broker.history(item,now,minutes=15,lookback_days=12)
                 h60=self.broker.history(item,now,minutes=60,lookback_days=30)
                 expected='UP' if s['direction']=='CE' else 'DOWN'
@@ -509,7 +524,10 @@ class InsightsService:
                    status='HYPOTHETICAL — OPTION QUOTE AGE NOT VERIFIED',
                    instrument_id=plan['security_id'],segment='NSE_FNO',
                    instrument_type='OPTSTK',quote_freshness='NOT VERIFIED',
-                   research_only=True,mtf={'15m':expected,'60m':expected},
+                   research_only=True,mtf={'5m':s['direction'],'15m':expected,'60m':expected},
+                   smc=dict(bos_up=smc['bos_up'],bos_down=smc['bos_down'],
+                            choch_up=smc['choch_up'],choch_down=smc['choch_down'],
+                            fvg_up=smc['fvg_up'],fvg_down=smc['fvg_down'],rvol=smc['rvol']),
                    order_flow_proxy='FUTURES OI BUILDUP + CHAIN OI; NOT TRADE DELTA')
                 # No journal record: option entry premiums are not timestamp-verified.
                 signals.append(plan)
