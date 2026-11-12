@@ -747,8 +747,11 @@ class InsightsService:
         now=now or datetime.now(IST)
         calendar=_holiday_set()
         local=now.astimezone(IST)
-        after_close=(calendar is not None and local.weekday()<5
-                     and local.date().isoformat() not in calendar
+        # Reuse the central exchange-session/holiday guard, including the
+        # built-in known closures. The off-hours window alone must never
+        # bypass an exchange holiday excluded from a user-provided calendar.
+        regular_session=is_market_session(local.replace(hour=15,minute=20,second=0,microsecond=0),calendar)
+        after_close=(regular_session
                      and (15,40)<=(local.hour,local.minute)<=(18,0))
         if not is_market_session(now,calendar) and not after_close:
             return dict(status='BLOCKED — holiday calendar missing, weekend or outside trading hours')
