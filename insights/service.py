@@ -560,6 +560,7 @@ class InsightsService:
                 ('dashboard',(9,20),self.dashboard),
                 ('shortlist-preview',(9,45),lambda stamp:self.discover_shortlist(stamp,final=False)),
                 ('index-options-preview',(9,45),self.scan_index_options),
+                ('fo-stocks-preview',(9,45),self.scan_fo),
                 ('shortlist-final',(10,0),lambda stamp:self.discover_shortlist(stamp,final=True)),
                 ('index-options',(10,0),self.scan_index_options),
                 ('fo-stocks',(10,0),self.scan_fo),
