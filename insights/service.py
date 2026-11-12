@@ -290,7 +290,16 @@ class InsightsService:
         now=now.astimezone(IST)
         date=now.date().isoformat()
         if self._shortlist_date!=date or not self._shortlist_finalized:
-            return dict(status='WAITING FOR FINAL 10:00 SHORTLIST',signals=[],buy_signals=[],sell_signals=[])
+            data=dict(status='WAITING FOR FINAL 10:00 SHORTLIST',
+                      signals=[],buy_signals=[],sell_signals=[],
+                      preview_buy=list(self._preview_buy) if self._shortlist_date==date else [],
+                      preview_sell=list(self._preview_sell) if self._shortlist_date==date else [],
+                      scanned=0,shortlisted=0,shortlist_size=0,shortlist_finalized=False,
+                      data_assessed=0,unavailable_count=0,stale_data=0,
+                      missing_sector=0,rules_not_met=0,qualified_buy=0,qualified_sell=0,
+                      note='No full-universe scan from this monitoring call; waiting for 10:00 final shortlist.')
+            self._update('intraday',data,now)
+            return data
         nifty,sectors=self._context()
         mapping=_sector_map()
         selected=list(self._shortlist)
