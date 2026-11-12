@@ -662,7 +662,17 @@ class InsightsService:
         universe, and if a watchlist is provided, respects its explicit limit.
         """
         now=now.astimezone(IST)
-        universe=self._stock_list()
+        all_stocks=[x for x in self.instruments() if x.get('kind')=='stock']
+        if WATCHLIST:
+            selected={_norm(v) for v in WATCHLIST}
+            all_stocks=[x for x in all_stocks if
+                _norm(x['symbol']) in selected or _norm(x.get('ticker','')) in selected]
+        # Separate limit from intraday's 30-stock deep analysis cap.
+        # The available master may be only the F&O subset. Do not claim
+        # comprehensive NSE/BSE coverage unless master supports that.
+        try:maximum=max(1,min(500,int(os.getenv('INSIGHTS_LONGTERM_MAX_SYMBOLS','80'))))
+        except (ValueError,TypeError):maximum=80
+        universe=all_stocks[:maximum]
         fundamentals=self._dated_research_bundle('INSIGHTS_FUNDAMENTALS_FILE')
         surveillance=self._dated_research_bundle('INSIGHTS_SURVEILLANCE_FILE')
         # NIFTY 500 relative strength ranks must be independently sourced.
@@ -697,7 +707,9 @@ class InsightsService:
             -(row['volume_ratio'] if row['volume_ratio'] is not None else 0),
             row['symbol']))
         multi_rows.sort(key=lambda row:(-row['score'],-row['verified_count'],row['symbol']))
-        meta=dict(universe=len(universe),missing_or_short_history=insufficient,
+        meta=dict(universe=len(universe),available_instrument_master=len(all_stocks),
+                  limited_universe=len(all_stocks)>len(universe),
+                  missing_or_short_history=insufficient,
                   unavailable_count=failures,asof=now.isoformat(),
                   note='Completed daily candles only; no live orders or fill assumptions.')
         self._update('swing-trades',dict(
