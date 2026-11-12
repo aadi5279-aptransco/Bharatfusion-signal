@@ -12,7 +12,7 @@ from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
-from insights.strategies import swing,multibagger
+from insights.strategies import swing,multibagger,momentum_query
 
 DISCLAIMER='Rule-based research, not investment advice. Signals are not guaranteed; trading can cause significant losses. No orders are placed.'
 
@@ -67,6 +67,7 @@ class InsightsService:
         self._discovery_stale=0
         self._discovery_errors=0
         self._discovery_missing_structure=0
+        self._intraday_daily_cache={}
         self._manual_requested_at=0.0
         self._manual_thread=None
         self._manual_refresh=dict(status='IDLE')
@@ -321,7 +322,11 @@ class InsightsService:
         return data
 
     def scan_intraday(self,now):
-        """Monitor only the locked shortlist; 5m+15m+60m and huge volume."""
+        """Exact cash daily + 15m momentum screen; monitor only 10:00 shortlist.
+
+        No SMC/BOS/NIFTY/sector gate is silently added to the user's 11
+        specified query conditions. Missing/old data fails closed.
+        """
         now=now.astimezone(IST)
         date=now.date().isoformat()
         if self._shortlist_date!=date or not self._shortlist_finalized:
@@ -332,11 +337,9 @@ class InsightsService:
                       scanned=0,shortlisted=0,shortlist_size=0,shortlist_finalized=False,
                       data_assessed=0,unavailable_count=0,stale_data=0,
                       missing_sector=0,rules_not_met=0,qualified_buy=0,qualified_sell=0,
-                      note='No full-universe scan from this monitoring call; waiting for 10:00 final shortlist.')
+                      note='Monitoring does not repeat the full-universe discovery.')
             self._update('intraday',data,now)
             return data
-        nifty,sectors=self._context()
-        mapping=_sector_map()
         selected=list(self._shortlist)
         stats=dict(scanned=len(selected),universe_scanned_at_discovery=self._discovery_scanned,
                    discovery_data_assessed=self._discovery_data_assessed,
@@ -344,65 +347,87 @@ class InsightsService:
                    discovery_errors=self._discovery_errors,
                    discovery_missing_structure=self._discovery_missing_structure,
                    shortlisted=len(selected),data_assessed=0,unavailable_count=0,
-                   stale_data=0,missing_sector=0,rules_not_met=0)
+                   stale_data=0,missing_sector=0,rules_not_met=0,
+                   missing_daily=0,missing_15m=0,daily_rules_failed=0,
+                   fifteen_rules_failed=0)
         buy=[];sell=[]
-        if not recent_context(nifty,now):
-            data=dict(status='NO VERIFIED CURRENT-SESSION NIFTY CONTEXT',signals=[],
-                      buy_signals=[],sell_signals=[],**stats)
-            self._update('intraday',data,now)
-            return data
+        # Dhan's prior daily bars are immutable during the session. Cache
+        # once by symbol/day; never refetch all 100 days every 5 minutes.
+        self._intraday_daily_cache={
+           k:v for k,v in self._intraday_daily_cache.items() if k[0]==date
+        }
         depths={}
         if hasattr(self.broker,'depth_snapshots'):
             try:depths=self.broker.depth_snapshots(selected,now)
             except (BrokerUnavailable,ValueError,TypeError):depths={}
         for item in selected:
-            sector_name=mapping.get(_norm(item['symbol']),mapping.get(_norm(item.get('ticker','')),''))
-            sec=sectors.get(sector_name)
-            if not sec or not recent_context(sec,now):
-                stats['missing_sector']+=1
-                continue
             try:
                 five=self.broker.history(item,now,minutes=5,lookback_days=8)
                 if not recent_frame(five,now,5,20):
                     stats['stale_data']+=1
                     continue
                 stats['data_assessed']+=1
-                quick=advanced_smc.structure(five,now)
-                if not quick.get('available') or quick['rvol']<2.0 or not (
-                        quick['up_breakout'] or quick['down_breakdown']):
-                    stats['rules_not_met']+=1
-                    continue  # no needless 15m/60m calls for non-breakouts
-                fifteen=self.broker.history(item,now,minutes=15,lookback_days=12)
-                sixty=self.broker.history(item,now,minutes=60,lookback_days=30)
-                results=[]
+                key=(date,str(item['segment']),str(item['id']))
+                prior_daily=self._intraday_daily_cache.get(key)
+                if prior_daily is None:
+                    prior_daily=self.broker.daily(item,now,days=100)
+                    if prior_daily is not None and len(prior_daily)>=20:
+                        self._intraday_daily_cache[key]=prior_daily
+                if prior_daily is None or len(prior_daily)<20:
+                    stats['missing_daily']+=1
+                    continue
+                # Cheap daily gate before requesting costly HTF history.
+                passes=[]
                 for side in ('BUY','SELL'):
-                    result=advanced_smc.signal(five,fifteen,sixty,side,item['symbol'],now,
-                        nifty['session_change'],sec['session_change'],
-                        depths.get(str(item['id'])))
-                    if result:
-                        result.update(instrument_id=item['id'],segment=item['segment'],
-                                      instrument_type=item['instrument'],
-                                      data_asof=five.index[-1].isoformat(),
-                                      quote_freshness='COMPLETED 5m CANDLE',
-                                      backtest_status='UNVALIDATED')
-                        results.append(result)
-                if not results:stats['rules_not_met']+=1
-                for result in results:
+                    match=momentum_query.daily_gate(five,prior_daily,now,side)
+                    if match and match['pass_all']:
+                        passes.append(side)
+                if not passes:
+                    stats['daily_rules_failed']+=1
+                    stats['rules_not_met']+=1
+                    continue
+                fifteen=self.broker.history(item,now,minutes=15,lookback_days=12)
+                if not recent_frame(fifteen,now,15,35):
+                    stats['missing_15m']+=1
+                    continue
+                qualified=False
+                for side in passes:
+                    m15=momentum_query.fifteen_gate(fifteen,now,side)
+                    if not m15 or not m15['pass_all']:
+                        stats['fifteen_rules_failed']+=1
+                        continue
+                    raw=depths.get(str(item['id'])) if isinstance(depths,dict) else None
+                    flow=('RESTING BID/ASK DEPTH PROXY — NOT EXECUTED DELTA'
+                          if raw and raw.get('verified') else
+                          'NOT VERIFIED — candle volume is not aggressor order flow')
+                    result=momentum_query.candidate(
+                        five,prior_daily,fifteen,item['symbol'],now,side,flow)
+                    if not result:continue
+                    result.update(instrument_id=item['id'],segment=item['segment'],
+                                  instrument_type=item['instrument'],
+                                  quote_freshness='COMPLETED 5m+15m INPUTS; PROVISIONAL DAILY',
+                                  data_asof=five.index[-1].isoformat(),
+                                  backtest_status='UNVALIDATED')
                     self.journal.record(result)
-                    (buy if result['direction']=='BUY' else sell).append(result)
-            except (BrokerUnavailable,ValueError,KeyError,TypeError):
+                    (buy if side=='BUY' else sell).append(result)
+                    qualified=True
+                if not qualified:stats['rules_not_met']+=1
+            except (BrokerUnavailable,ValueError,KeyError,TypeError,IndexError):
                 stats['unavailable_count']+=1
-        buy.sort(key=lambda x:x['confidence'],reverse=True)
-        sell.sort(key=lambda x:x['confidence'],reverse=True)
-        data=dict(status=('NO ELIGIBLE SHORTLIST — SEE DISCOVERY DIAGNOSTICS'
-                           if not selected else 'SHORTLIST SCAN COMPLETE — RESEARCH ONLY'),
-                  signals=(buy[:10]+sell[:10]),buy_signals=buy[:10],sell_signals=sell[:10],
+        buy.sort(key=lambda r:(-r['daily_volume_ratio'],-r['volume_ratio15'],r['symbol']))
+        sell.sort(key=lambda r:(-r['daily_volume_ratio'],-r['volume_ratio15'],r['symbol']))
+        status=('NO ELIGIBLE SHORTLIST — SEE DISCOVERY DIAGNOSTICS'
+                if not selected else 'DAILY + 15m MOMENTUM QUERY SCAN COMPLETE — RESEARCH ONLY')
+        data=dict(status=status,signals=buy[:10]+sell[:10],
+                  buy_signals=buy[:10],sell_signals=sell[:10],
                   preview_buy=list(self._preview_buy),preview_sell=list(self._preview_sell),
                   shortlist_symbols=[x['symbol'] for x in selected],
                   discovery_mode=self._discovery_mode,breadth_quotes=self._breadth_quotes,
                   qualified_buy=len(buy),qualified_sell=len(sell),**stats,
                   shortlist_finalized=True,
-                  note='BUY = high-volume breakout; SELL = high-volume breakdown (cash-side research). MTF 5m/15m/60m required. Resting order depth is NOT actual trade delta.')
+                  daily_candle_status='PROVISIONAL current-session OHLCV built from completed 5m candles',
+                  query_rules='8 DAILY + 3 COMPLETED 15m MUST ALL PASS',
+                  note='Both directions require every user-specified daily and 15m rule; no additional SMC or sector hard gate. Running daily volume/RSI may change before close; no fills are claimed.')
         self._update('intraday',data,now)
         return data
 
