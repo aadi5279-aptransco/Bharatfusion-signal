@@ -662,7 +662,9 @@ class InsightsService:
         universe, and if a watchlist is provided, respects its explicit limit.
         """
         now=now.astimezone(IST)
-        all_stocks=[x for x in self.instruments() if x.get('kind')=='stock']
+        all_stocks=(self.broker.longterm_instruments()
+                    if hasattr(self.broker,'longterm_instruments')
+                    else [x for x in self.instruments() if x.get('kind')=='stock'])
         if WATCHLIST:
             selected={_norm(v) for v in WATCHLIST}
             all_stocks=[x for x in all_stocks if
@@ -672,8 +674,22 @@ class InsightsService:
         # comprehensive NSE/BSE coverage unless master supports that.
         try:maximum=max(1,min(500,int(os.getenv('INSIGHTS_LONGTERM_MAX_SYMBOLS','80'))))
         except (ValueError,TypeError):maximum=80
-        universe=all_stocks[:maximum]
         fundamentals=self._dated_research_bundle('INSIGHTS_FUNDAMENTALS_FILE')
+        funding_names={_norm(k) for k in (fundamentals.get('symbols') or {})}
+            if isinstance(fundamentals,dict) else set()
+        priority=lambda item:(
+            _norm(item['symbol']) not in funding_names,
+            _norm(item['symbol']),str(item['id']))
+        nse=sorted((x for x in all_stocks if x.get('segment')=='NSE_EQ'),key=priority)
+        bse=sorted((x for x in all_stocks if x.get('segment')=='BSE_EQ'),key=priority)
+        if nse and bse and not WATCHLIST:
+            nse_quota=max(1,round(maximum*.7))
+            bse_quota=maximum-nse_quota
+            selected=nse[:nse_quota]+bse[:bse_quota]
+            extra=[x for x in nse[nse_quota:]+bse[bse_quota:] if x not in selected]
+            universe=(selected+extra)[:maximum]
+        else:
+            universe=sorted(all_stocks,key=priority)[:maximum]
         surveillance=self._dated_research_bundle('INSIGHTS_SURVEILLANCE_FILE')
         # NIFTY 500 relative strength ranks must be independently sourced.
         rank_source=self._dated_research_bundle('INSIGHTS_RS_RANK_FILE')
