@@ -312,18 +312,29 @@ class InsightsService:
 
     def scan_btst(self,now):
         _,sectors=self._context();mapping=_sector_map();picks=[];skipped=0
+        if self._shortlist_date!=now.date().isoformat() or not self._shortlist_finalized:
+            data=dict(signals=[],status='BTST WAITING FOR LOCKED 10:00 SHORTLIST',
+                      scanned=0,blocked=0)
+            self._update('btst',data,now)
+            return data
+        stocks=list(self._shortlist)
         path=os.getenv('INSIGHTS_LICENSED_DELIVERY_FILE','')
         try:delivery=json.loads(Path(path).read_text('utf-8')) if path else {}
         except (OSError,ValueError,TypeError):delivery={}
         current=delivery.get('date')==now.date().isoformat()
-        for item in self._stock_list():
+        for item in stocks:
             sec=sectors.get(mapping.get(_norm(item['symbol']),mapping.get(_norm(item.get('ticker','')),'')))
             vals=(delivery.get('values') or {})
             dp=vals.get(item['symbol'],vals.get(item.get('ticker',''))) if current else None
             if not sec or dp is None:skipped+=1;continue
             try:
                 f=self.broker.history(item,now,minutes=5,lookback_days=50)
-                daily=self.broker.daily(item,now,days=80)
+                daily=self.broker.daily(item,now,days=120)
+                h15=self.broker.history(item,now,minutes=15,lookback_days=12)
+                h60=self.broker.history(item,now,minutes=60,lookback_days=30)
+                if not recent_frame(h15,now,15,35) or not advanced_smc.btst_confirm(h15,h60,daily,now):
+                    skipped+=1
+                    continue
                 # Historical intraday data is required to compare matching 15:00 volume.
                 complete={}
                 for day,g in f.groupby(f.index.normalize()):
@@ -339,7 +350,9 @@ class InsightsService:
             except (BrokerUnavailable,ValueError,KeyError):skipped+=1
         picks.sort(key=lambda x:x['confidence'],reverse=True)
         status='RESEARCH ONLY — BACKTEST VALIDATION REQUIRED' if picks else 'NO QUALIFIED BTST: requires Dhan matched-time history + licensed dated delivery data'
-        data=dict(signals=picks[:10],status=status,scanned=len(self._stock_list()),blocked=skipped)
+        data=dict(signals=picks[:10],status=status,scanned=len(stocks),blocked=skipped,
+                  shortlisted=len(stocks),mtf='15m+60m+Daily+completed Weekly',
+                  order_flow_proxy='Relative volume/delivery; no true transaction delta')
         self._update('btst',data,now)
         return data
 
