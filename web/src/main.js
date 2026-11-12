@@ -185,7 +185,8 @@ function SwingTrades({data}) {
  const table=e('table',{className:'research-table'},e('thead',null,e('tr',null,...cols.map(k=>e('th',{key:k},k)))),tbody);
  return e('div',null,
   e('p',{className:'small muted'},'Daily completed candles only. Entries/targets are research reference levels, not live orders.'),
-  e('p',{className:'small muted'},'Status: ',data.status||'Waiting',' · Updated: ',data.updated_at||'—',' · Universe: ',data.universe??'—'),
+  e('p',{className:'small muted'},'Status: ',data.status||'Waiting',' · Updated: ',data.updated_at||'—',' · Universe: ',data.universe??'—',
+   ' / ',data.available_instrument_master??'—',' available cash stocks'),
   e(Section,{title:'Swing setups · ranked by Risk:Reward and trend strength'},
     rows.length?e('div',{className:'tablewrap'},table):e('div',{className:'empty'},'No qualified swing setup from completed daily candles.')));
 }
@@ -230,7 +231,9 @@ function MultibaggerResearch({data}) {
      e('label',null,e('input',{type:'checkbox',checked:showUnverified,onChange:v=>setShowUnverified(v.target.checked)}),
        ' Include blocked/unverified candidates for review')),
    e('p',{className:'small muted'},'Status: ',data.status||'Waiting',' · Reviewed: ',scored.length,
-     ' · Fully eligible at selected cap: ',scored.filter(x=>x.eligible).length,' · Updated: ',data.updated_at||'—'),
+     ' · Fully eligible at selected cap: ',scored.filter(x=>x.eligible).length,
+     ' · Sampled: ',data.universe??'—',' / ',data.available_instrument_master??'—',
+     ' · Updated: ',data.updated_at||'—'),
    e(Section,{title:'Multibagger score breakdown'},
      cards.length?e('div',{className:'research-candidates'},...cards):e('div',{className:'empty'},'No candidates to show yet.')));
 }
