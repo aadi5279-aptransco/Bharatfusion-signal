@@ -4,8 +4,8 @@ import {createChart, CandlestickSeries, HistogramSeries} from 'lightweight-chart
 import './styles.css';
 const e=React.createElement;
 const RISK='Rule-based analytics, not investment advice. Entries and targets are not guaranteed. Trading carries risk of loss. No orders are placed.';
-const tabs=[['Dashboard','▦'],['Analyse','⌕'],['Intraday','↗'],['BTST','◷'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
-const route={'Dashboard':'dashboard','Analyse':'analyse','Intraday':'intraday','BTST':'btst','Index Options':'index-options','F&O Stocks':'fo-stocks','Swing Trades':'swing-trades','Multibagger':'multibagger','Track Record':'track-record'};
+const tabs=[['Dashboard','▦'],['Analyse','⌕'],['Pre-Market 8 AM','☼'],['Intraday','↗'],['BTST','◷'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
+const route={'Dashboard':'dashboard','Analyse':'analyse','Pre-Market 8 AM':'pre-market','Intraday':'intraday','BTST':'btst','Index Options':'index-options','F&O Stocks':'fo-stocks','Swing Trades':'swing-trades','Multibagger':'multibagger','Track Record':'track-record'};
 async function api(url,options={}){const res=await fetch(url,{...options,headers:{Accept:'application/json',...(options.headers||{})},cache:'no-store'});const body=await res.json();if(!res.ok)throw Error(body.error||`HTTP ${res.status}`);return body;}
 function Text({children,muted=false}){return e('span',{className:muted?'muted':''},children);}
 function Badge({children,type=''}){return e('span',{className:`badge ${type}`},children);}
@@ -42,10 +42,10 @@ function PriceChart({candles=[],fib=null}){
    grid:{vertLines:{visible:false},horzLines:{color:'#233349'}}});
   const series=chart.addSeries(CandlestickSeries,{upColor:'#41cba5',downColor:'#ef6576',borderVisible:false,wickUpColor:'#41cba5',wickDownColor:'#ef6576'});
   series.setData(candles.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));
-  if(fib)for(const level of ['0','0.44','0.5','1']){
+  if(fib)for(const level of ['0','0.44','0.5','0.56','1']){
     const v=Number(fib[level]);
     if(!Number.isFinite(v)||v<=0)continue;
-    series.createPriceLine({price:v,color:level==='0.44'?'#eeb95f':level==='0.5'?'#77adfa':level==='1'?'#62dbb8':'#ff8b9b',
+    series.createPriceLine({price:v,color:level==='0.44'?'#eeb95f':level==='0.5'?'#77adfa':level==='1'?'#62dbb8':level==='0.56'?'#d993e9':'#ff8b9b',
       lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Fib '+level});
   }
   chart.timeScale().fitContent();
@@ -427,6 +427,7 @@ function App(){
     error?e(Notice,{warning:true},error):null,
     active==='Dashboard'?e(Dashboard,{data,onRefresh,refreshBusy,refreshState:health.manual_refresh,refreshError}):null,
     active==='Analyse'?e(Analyse,{data,onSearch,busy}):null,
+    active==='Pre-Market 8 AM'?e(PremarketWatch,{data}):null,
     active==='Swing Trades'?e(SwingTrades,{data}):null,
     active==='Multibagger'?e(MultibaggerResearch,{data}):null,
     ['Intraday','BTST','Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
@@ -450,7 +451,9 @@ function App(){
        'Option premiums are hypothetical until quote timestamps, expiry and historical performance are independently verified. No trades are placed or recorded as executed.'):null,
      active==='Intraday'?e(IntradaySignals,{data}):
      e(React.Fragment,null,
-       ['Index Options','F&O Stocks'].includes(active)?e(FibOptionSetups,{items:data.fib_setups||[]}):null,
+       ['Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
+       e(OpeningOptionSetups,{items:data.opening_setups||[]}),
+       e(FibOptionSetups,{items:data.fib_setups||[]})):null,
        e(Section,{title:'Existing rule-based research candidates'},
           e(Signals,{items:data.signals||[],empty:data.status||'No qualifying signals. Missing inputs are never filled with invented values.'})))) :null,
     active==='Track Record'?e(TrackRecord,{data}):null,
