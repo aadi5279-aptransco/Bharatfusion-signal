@@ -119,7 +119,10 @@ class LongtermSchedulerTests(unittest.TestCase):
             clock=lambda h,m:datetime(2026,11,12,h,m,tzinfo=IST)
             with patch('insights.service._holiday_set',return_value=set()):
                 self.assertEqual(svc.run_due(clock(15,35))['status'].startswith('BLOCKED'),True)
-                self.assertEqual(svc.run_due(clock(15,40))['status'],'DAILY LONGTERM COMPLETE')
+                result=svc.run_due(clock(15,40))
+                self.assertEqual(result['status'],'DAILY LONGTERM COMPLETE')
+                self.assertEqual(result['premarket_prepared'],0)
+                self.assertIn('UNAVAILABLE',result['premarket_prep_status'])
                 self.assertEqual(svc.run_due(clock(15,45))['status'],'DAILY LONGTERM ALREADY COMPLETE')
                 svc.scan_longterm.assert_called_once()
                 self.assertIn('BLOCKED',svc.run_due(datetime(2026,11,10,15,45,tzinfo=IST))['status'])
