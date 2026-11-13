@@ -65,6 +65,20 @@ class PreMarketTests(unittest.TestCase):
                 self.assertEqual(svc.run_due(datetime(2026,11,13,8,5,tzinfo=IST))['status'],'PRE-MARKET WATCHLIST ALREADY COMPLETE')
                 self.assertIn('BLOCKED',svc.run_due(datetime(2026,11,14,8,0,tzinfo=IST))['status'])
             svc.scan_premarket.assert_called_once()
+    def test_after_close_cache_reloads_at_8am_without_requery(self):
+        with tempfile.TemporaryDirectory() as folder:
+            end=datetime(2026,11,12,16,0,tzinfo=IST)
+            first=InsightsService(MockDailyBroker(),folder)
+            with patch('insights.service._holiday_set',return_value=set()):
+                prepared=first.scan_premarket(end)
+                self.assertEqual(prepared['previous_session'],'2026-11-12')
+                restored=InsightsService(MockDailyBroker(),folder)
+                self.assertEqual(restored.snapshot('pre-market')['assessed'],2)
+                restored.scan_premarket=Mock()
+                response=restored.run_due(datetime(2026,11,13,8,0,tzinfo=IST))
+                self.assertEqual(response['status'],'PRE-MARKET WATCHLIST READY FROM PRIOR CLOSE')
+                restored.scan_premarket.assert_not_called()
+
     def test_no_lookahead_at_early_session_even_if_daily_has_today(self):
         f=daily();now=datetime(2026,11,13,8,0,tzinfo=IST)
         x=premarket.evaluate(f,'GAIN',now)
