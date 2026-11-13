@@ -13,9 +13,21 @@ def setup(breakout=True,low_volume=False,with_today=True):
     high=close+.45
     low=close-.65
     op=close-.30
+    if breakout:
+        # Breakout must CLOSE in the top 30% of the signal day's range,
+        # not merely break above the prior high. The old fixture's
+        # (close-low)/(high-low) = .65/1.10 = 59% correctly failed.
+        high.iloc[-1]=close.iloc[-1]+.10
     vol=[650000.]*len(idx)
-    if breakout:vol[-1]=1400000
-    if low_volume:vol=[1000.]*len(idx)
+    if low_volume:
+        # Preserve a genuine >=1.5x volume breakout while making the
+        # trailing 20-day average rupee turnover too small to qualify.
+        # Setting all days to 1000 would invalidate breakout volume
+        # and never reach the intended liquidity guard.
+        vol=[1000.]*len(idx)
+        if breakout:vol[-1]=2400.
+    elif breakout:
+        vol[-1]=1400000.
     stock=pd.DataFrame(dict(open=op,high=high,low=low,
                             close=close,volume=vol),index=idx)
     benchmark=pd.DataFrame(dict(close=[100+j*.025 for j in range(len(idx))]),index=idx)
@@ -28,6 +40,8 @@ class PDFSwingTests(unittest.TestCase):
         now=pd.Timestamp('2026-11-13 16:00',tz=IST)
         r=swing_guide.evaluate(f,'DEMO',now,benchmark=n)
         self.assertIn('TIGHT BASE BREAKOUT',r['matched_setups'])
+        self.assertGreater((f.close.iloc[-1]-f.low.iloc[-1])/
+                           (f.high.iloc[-1]-f.low.iloc[-1]),.7)
         self.assertEqual(r['relative_strength'],'AVAILABLE')
         self.assertGreater(r['entry'],r['stop'])
         self.assertGreater(r['target_2r'],r['entry'])
@@ -47,9 +61,12 @@ class PDFSwingTests(unittest.TestCase):
         self.assertIn('TIGHT BASE BREAKOUT',r['matched_setups'])
         self.assertIsNone(r['entry'])
         self.assertIn('UNAVAILABLE',r['relative_strength'])
-    def test_turnover_floor_blocks_spurious_penny_breakout(self):
+    def test_turnover_floor_blocks_illiquid_breakout(self):
         f,n=setup(low_volume=True)
         r=swing_guide.evaluate(f,'DEMO',pd.Timestamp('2026-11-13 16:00',tz=IST),benchmark=n)
+        self.assertIn('TIGHT BASE BREAKOUT',r['matched_setups'])
+        self.assertGreater(r['volume_ratio'],1.5)
+        self.assertLess(r['average_turnover_cr'],5)
         self.assertIsNone(r['entry'])
         self.assertEqual(r['status'],'WATCH — PRICE OR TURNOVER BELOW GUIDE FLOOR')
     def test_no_lookahead_benchmark_and_data_rejections(self):
