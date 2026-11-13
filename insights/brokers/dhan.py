@@ -247,13 +247,21 @@ class DhanReadOnly:
             if not isinstance(quote,dict):continue
             try:
                 price=float(quote.get('last_price') or 0)
-                session_open=float((quote.get('ohlc') or {}).get('open') or 0)
+                ohlc=quote.get('ohlc') or {}
+                session_open=float(ohlc.get('open') or 0)
+                previous_close=float(ohlc.get('close') or 0)
                 volume=float(quote.get('volume') or 0)
-                if price<=0 or session_open<=0 or volume<=0:continue
-                change_pct=100*(price/session_open-1)
+                if price<=0 or volume<=0:continue
+                # In Dhan's quote OHLC, close is the previous session close.
+                # If unavailable use session-open change, clearly labelled.
+                baseline=previous_close if previous_close>0 else session_open
+                if baseline<=0:continue
+                change_pct=100*(price/baseline-1)
             except (TypeError,ValueError,ZeroDivisionError):continue
             if not -40<=change_pct<=40:continue
             out[key]=dict(change_pct=round(change_pct,3),volume=volume,
+                last_price=round(price,2),
+                baseline_type='PREVIOUS_CLOSE' if previous_close>0 else 'SESSION_OPEN',
                 fetched_at=now.isoformat(),source='DHAN SESSION QUOTE')
         return out
 
