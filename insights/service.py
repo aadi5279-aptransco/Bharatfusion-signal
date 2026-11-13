@@ -1176,8 +1176,11 @@ class InsightsService:
                     if include_opportunity:
                         opportunity['swing_gann_wave']=gann_layer
                         opportunity['gann_wave_alignment']=gann_layer.get('alignment','UNAVAILABLE')
-                        opportunity['verified_fpi_disclosed_buy_recent']=(
-                            _norm(item['symbol']) in verified_fpi_buys)
+                        fno_root=str((item.get('future') or {}).get('symbol','')).split('-')[0]
+                        aliases={_norm(item.get('symbol','')),
+                                 _norm(item.get('ticker','')),_norm(fno_root)}
+                        opportunity['verified_fpi_disclosed_buy_recent']=bool(
+                            aliases & verified_fpi_buys)
                         opportunity['fii_evidence_scope']=(
                             'EXACT VERIFIED NSE BULK/BLOCK BUY ONLY — NOT TOTAL FII FLOW'
                             if opportunity['verified_fpi_disclosed_buy_recent'] else
