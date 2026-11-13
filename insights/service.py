@@ -54,6 +54,18 @@ class InsightsService:
           'fo-stocks':{'signals':[],'fib_setups':[],'opening_setups':[],'status':'WAITING FOR FUTURES OI'},
           'swing-trades':{'signals':[],'status':'WAITING FOR COMPLETED DAILY SCAN'},
           'multibagger':{'candidates':[],'status':'WAITING FOR COMPLETED DAILY SCAN'}}
+        # Restore a prior close's readonly watchlist across app restarts.
+        # Never persist Dhan tokens, SDK objects or trading orders.
+        self._premarket_path=self.root/'premarket_watch.json'
+        try:
+            saved=json.loads(self._premarket_path.read_text(encoding='utf-8'))
+            if (isinstance(saved,dict) and
+                isinstance(saved.get('gainers'),list) and
+                isinstance(saved.get('losers'),list) and
+                isinstance(saved.get('previous_session'),str)):
+                self._snapshots['pre-market']=saved
+        except (OSError,ValueError,TypeError):
+            pass
         self._done=set();self._thread=None;self._stop=threading.Event()
         self._shortlist_date=None
         self._shortlist_finalized=False
@@ -566,6 +578,15 @@ class InsightsService:
                  else 'NO VERIFIED PRIOR-SESSION WATCHLIST DATA',
             note='Based only on the latest completed daily bars. Previous-day movers and 20-day closing breakouts are identified separately. Not a promise of next-day direction.')
         self._update('pre-market',payload,now)
+        # Atomic local cache. A crash may leave the old watchlist, which
+        # the morning scheduler validates against the expected session.
+        try:
+            temp=self._premarket_path.with_suffix('.json.tmp')
+            temp.write_text(json.dumps(self.snapshot('pre-market'),
+                ensure_ascii=False,allow_nan=False),encoding='utf-8')
+            temp.replace(self._premarket_path)
+        except (OSError,ValueError,TypeError):
+            pass
         return payload
 
     def _opening_setups(self,item,now,cash_five=None):
@@ -989,6 +1010,21 @@ class InsightsService:
             try:
                 key=(local.date().isoformat(),'premarket-8am')
                 if key in self._done:return dict(status='PRE-MARKET WATCHLIST ALREADY COMPLETE')
+                # Reuse an after-close batch only if it belongs to the most
+                # recent actual eligible trading day. Weekends and configured
+                # holidays are skipped, without assuming calendar-day minus 1.
+                prior=local-timedelta(days=1)
+                for _ in range(15):
+                    at=prior.replace(hour=10,minute=0,second=0,microsecond=0)
+                    if is_market_session(at,calendar):break
+                    prior-=timedelta(days=1)
+                else:prior=None
+                cached=self.snapshot('pre-market')
+                if (prior is not None and cached.get('previous_session')==prior.date().isoformat()
+                    and cached.get('assessed',0)>0 and not cached.get('mixed_data_dates')):
+                    self._done.add(key)
+                    return dict(status='PRE-MARKET WATCHLIST READY FROM PRIOR CLOSE',
+                                assessed=cached['assessed'])
                 result=self.scan_premarket(local)
                 self._done.add(key)
                 return dict(status='PRE-MARKET WATCHLIST COMPLETE',
@@ -1002,6 +1038,16 @@ class InsightsService:
                 key=(local.date().isoformat(),'longterm-daily')
                 if key in self._done:return dict(status='DAILY LONGTERM ALREADY COMPLETE')
                 result=self.scan_longterm(local)
+                # Produce and persist the NEXT morning's watchlist using
+                # today's fully completed daily candles. Any premarket
+                # failure is reported, but cannot retroactively erase the
+                # successful swing/multibagger scan.
+                try:
+                    prepared=self.scan_premarket(local)
+                    result['premarket_prepared']=prepared.get('assessed',0)
+                except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
+                    with self._lock:self._last_error='premarket-prep: '+str(exc)[:160]
+                    result['premarket_prepared']=0
                 self._done.add(key)
                 return dict(status='DAILY LONGTERM COMPLETE',**result)
             except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
