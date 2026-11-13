@@ -115,6 +115,20 @@ class NSEParticipantTests(unittest.TestCase):
         self.assertIsNone(result["expiry_date"])
         self.assertIsNone(result["participants"]["FII"]["cycle_futures_net_change"])
         self.assertIn("UNVERIFIED",result["cycle_label"])
+    def test_sqlite_handle_released_after_read_and_write(self):
+        """Windows must be able to rename DB while store object remains alive."""
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/"positions.sqlite"
+            store=nse.ParticipantStore(path)
+            store.save(self.day,make_csv(self.day,"oi",state()),
+                       make_csv(self.day,"vol",state()),self.now.isoformat())
+            self.assertTrue(store.complete(self.day))
+            self.assertEqual(len(store.history()),1)
+            moved=path.with_name("renamed_positions.sqlite")
+            path.replace(moved)
+            moved.replace(path)
+            self.assertTrue(store.complete(self.day))
+
     def test_no_market_data_stays_unavailable_not_neutral(self):
         x=nse.summarize({},asof=self.now)
         self.assertEqual(x["overall_direction"],"UNAVAILABLE")
