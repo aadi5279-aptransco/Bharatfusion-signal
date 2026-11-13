@@ -94,14 +94,73 @@ function Dashboard({data,onRefresh,refreshBusy,refreshState,refreshError}){
     (x.warnings||[]).length?e('p',{className:'small muted'},x.warnings.join(' · ')):null)):e('p',{className:'muted'},'Connect Dhan and provide current completed index candles to calculate bias.')),
    e(Section,{title:'Sector momentum heatmap'},sectors.length?e('div',{className:'heatmap'},sectors.map((s,i)=>e('div',{className:'heat',key:i,style:{background:s.session_change>=0?'var(--heat-green)':'var(--heat-red)'}},e('b',null,s.sector),e('strong',null,`${s.session_change>0?'+':''}${s.session_change}%`),e('small',null,`vs NIFTY ${s.relative_strength??'—'}%`)))):e('div',{className:'empty'},'Sector data unavailable. Rankings will appear only when Dhan provides verified sector candles.'))));
 }
+function AnalyseChooser({onSelect,busy}){
+ const [choices,setChoices]=useState(null);
+ const [error,setError]=useState('');
+ const [refresh,setRefresh]=useState(0);
+ useEffect(()=>{
+  let alive=true;
+  api('/api/v1/market-insights/analyse/choices')
+   .then(v=>{if(alive)setChoices(v)})
+   .catch(err=>{if(alive)setError(err.message)});
+  return()=>{alive=false};
+ },[refresh]);
+ const group=(title,rows)=>e(Section,{title},
+  e('div',{className:'analyse-choices'},
+   ...(rows||[]).map((x,i)=>e('button',{key:i,type:'button',disabled:busy,
+      className:'mover-button',onClick:()=>onSelect(x.symbol)},
+      e('strong',null,x.symbol),
+      x.change_pct==null?null:e('span',{className:x.change_pct>0?'gain':'loss'},
+          (x.change_pct>0?'+':'')+x.change_pct.toFixed(2)+'%')))));
+ return e('div',null,
+  e('button',{type:'button',onClick:()=>setRefresh(v=>v+1)},'Refresh top movers'),
+  error?e(Notice,{warning:true},'Mover list unavailable: '+error):null,
+  choices?e('div',null,
+    e('p',{className:'small muted'},'Dhan quote coverage ',choices.coverage,'/',choices.universe,
+       ' · ',choices.asof,' · ',choices.stale?'Market closed / stale snapshot':'Trading session'),
+    e('div',{className:'analyse-selection-grid'},
+      group('Mapped indices',choices.indices),
+      group('Top gainers',choices.gainers),
+      group('Top losers',choices.losers))):null);
+}
+function AnalyseEvidence({data}){
+ const a=data.analysis||{},mtf=a.mtf||{},plan=data.entry_plan;
+ return e('div',null,
+  e('div',{className:'tile-grid'},
+    e(Tile,{title:'DIRECTION',value:data.bias||'UNAVAILABLE'}),
+    e(Tile,{title:'SETUP SCORE',value:a.score??'—',sub:'Heuristic, not probability'}),
+    e(Tile,{title:'WIN PROBABILITY',value:'UNAVAILABLE',sub:'No calibrated walk-forward model'}),
+    e(Tile,{title:'CHAIN STATUS',value:data.chain_status||'UNAVAILABLE'})),
+  e(Section,{title:'Multi-timeframe bias and risk plan'},
+    ...['5m','15m','60m'].map(k=>e('p',{key:k,className:'small muted'},
+      k,' · ',mtf[k]?.trend||'UNAVAILABLE',' · RSI ',mtf[k]?.rsi14??'—',
+      ' · ',mtf[k]?.asof||'—')),
+    plan?e('div',null,
+      e('p',null,'Underlying ',plan.direction,
+        ' · Entry ',price(plan.entry),' · SL ',price(plan.sl),
+        ' · T1 ',price(plan.t1),' · T2 ',price(plan.t2)),
+      e('p',{className:'small muted'},plan.entry_type,' · Risk ',plan.stop_distance_pct,'%')):
+      e('p',{className:'small muted'},'NO TRADE: no verified multi-timeframe breakout and acceptable stop.')),
+  e(Section,{title:'Order-flow evidence · Gann cycles · wave geometry'},
+    e('p',{className:'small muted'},'Depth: ',data.market_depth?.status||'UNVERIFIED',
+      ' · Bid/ask resting ratio: ',data.market_depth?.bid_ask_ratio??'—'),
+    e('p',{className:'small muted'},'Gann support: ',data.gann_wave?.gann?.support??'—',
+      ' · resistance: ',data.gann_wave?.gann?.resistance??'—'),
+    e('p',{className:'small muted'},'Near 9:15 cycle minutes: ',
+      (data.gann_wave?.time_cycle?.near_cycle_minutes||[]).join(', ')||'None',
+      ' · confirmed swing pattern: ',data.gann_wave?.wave?.structure||'UNAVAILABLE'),
+    e('p',{className:'small muted'},'Not executed trade flow, a validated Elliott count, or a win probability.')));
+}
 function Analyse({data,onSearch,busy}){
  const [symbol,setSymbol]=useState('NIFTY');const [expiry,setExpiry]=useState('');
  const m=data.metrics;
- return e(React.Fragment,null,e('form',{className:'searchbox',onSubmit:ev=>{ev.preventDefault();onSearch(symbol,expiry);}},
+ return e(React.Fragment,null,e(AnalyseChooser,{busy,onSelect:x=>{setSymbol(x);setExpiry('');onSearch(x,'')}}),e('form',{className:'searchbox',onSubmit:ev=>{ev.preventDefault();onSearch(symbol,expiry);}},
    e('input',{value:symbol,onChange:ev=>setSymbol(ev.target.value.toUpperCase()),placeholder:'NIFTY, SENSEX, BANKNIFTY or stock symbol',maxLength:64,'aria-label':'Instrument symbol'}),
    e('input',{value:expiry,onChange:ev=>setExpiry(ev.target.value),placeholder:'Expiry YYYY-MM-DD (optional)','aria-label':'Expiry date'}),
    e('button',{type:'submit',disabled:busy},busy?'Analysing…':'Analyse option chain')),
   data.error?e(Notice,{warning:true},data.error):null,
+  data.symbol?e(AnalyseEvidence,{data}):null,
+  data.symbol&&!m?e(Section,{title:'Cash or index price chart'},e(PriceChart,{candles:data.candles||[]})):null,
   m?e(React.Fragment,null,
     e('div',{className:'tile-grid'},e(Tile,{title:'OPEN-INTEREST PCR',value:m.pcr}),e(Tile,{title:'MAX PAIN',value:m.max_pain}),e(Tile,{title:'OI SUPPORT',value:m.oi_support}),e(Tile,{title:'OI RESISTANCE',value:m.oi_resistance})),
     e(Section,{title:'Multi-timeframe trend and flow proxies'},
