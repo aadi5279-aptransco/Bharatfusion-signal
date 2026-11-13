@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from insights.config import IST,ROOT,WATCHLIST,MAX_SYMBOLS,is_market_session
 from insights.db import Journal
+from insights.participant_refresh import ParticipantRefresh
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
@@ -44,6 +45,7 @@ class InsightsService:
     def __init__(self,broker=None,root=None):
         self.broker=broker or DhanReadOnly();self.root=Path(root or ROOT)
         self.journal=Journal(self.root/'insights.sqlite')
+        self.participant_manager=ParticipantRefresh(self.root,_holiday_set,self._participant_expiries)
         self._lock=threading.RLock();self._job_lock=threading.Lock()
         self._instruments=[];self._last_error='';self._timestamps={};self._snapshots={
           'dashboard':{'indices':[],'sectors':[],'status':'WAITING FOR DATA'},
@@ -86,6 +88,28 @@ class InsightsService:
         self._manual_requested_at=0.0
         self._manual_thread=None
         self._manual_refresh=dict(status='IDLE')
+
+    def _participant_expiries(self):
+        """Ask Dhan for genuine current/future NIFTY expiry dates.
+
+        Participant reports themselves are all-expiry aggregates. These
+        dates label a tracking window only, not individual option chains.
+        """
+        if not callable(getattr(self.broker,'expiry_list',None)):
+            return []
+        try:
+            index=next((x for x in self.instruments()
+                if x.get('kind')=='index' and _norm(x['symbol']) in ('NIFTY','NIFTY50')),None)
+            return list(self.broker.expiry_list(index)) if index else []
+        except (BrokerUnavailable,ValueError,KeyError,TypeError):
+            return []
+
+    def participant_positioning(self,now=None):
+        return self.participant_manager.summary(now or datetime.now(IST))
+
+    def request_participant_refresh(self,now=None):
+        """Local-only read-only asynchronous NSE archive request."""
+        return self.participant_manager.start(now or datetime.now(IST),force=True)
 
     def instruments(self):
         with self._lock:
@@ -1200,6 +1224,10 @@ class InsightsService:
         if self._thread:return
         def loop():
             while not self._stop.is_set():
+                # Official participant CSV download is independent from
+                # Dhan scans; it cannot delay an intraday order/scan loop.
+                try:self.participant_manager.start()
+                except Exception:pass
                 try:self.run_due()
                 except Exception:
                     with self._lock:self._last_error='Unexpected scan error (no orders sent)'
