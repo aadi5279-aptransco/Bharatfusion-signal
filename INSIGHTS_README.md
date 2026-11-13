@@ -699,3 +699,76 @@ Check `previous_session`, coverage counts and each candidate's
 `state`. Do not interpret historical watchlists as current
 trades. Source changes must still pass the Windows tests/build and
 live Dhan validation; do not assume predictive accuracy.
+
+## Analyse upgrade — top 20 each, manual F&O symbols and ATM CE/PE research
+
+The existing **Analyse** tab now shows **up to 20 top gainers and up to
+20 top losers**, plus all mapped indices. This extends the quote
+selection window from 15 to 20 on each side without inventing ranked
+securities when Dhan quote coverage is incomplete. At market close the
+quote list is flagged stale. A new browser autocomplete provides the
+current F&O stock names/tickers from the mapped Dhan instrument master;
+manual text entry still works. `InsightsService._lookup` also resolves
+an exact F&O futures root from Dhan's real mapped symbol, rather than
+guessing from company names.
+
+The new `insights/atm_recommendation.py` always attempts to identify
+the **nearest listed ATM strike** using the actual Dhan option chain
+and its reported underlying last_price (or a current-session completed
+5m close if the chain lacks it). It shows an independent selection
+status when spot data, expiry, contract ID, bid/ask or direction is
+unavailable. No arbitrary ATM strike is fabricated.
+
+A bullish 5/15/60 breakout may suggest an **ATM CE** study, and a
+bearish counterpart an **ATM PE** study. Alternatively, a single
+unambiguous first-5m/red-bar two-completed-close setup can provide a
+directional watch when multi-timeframe history is missing. Conflicting
+or absent direction is **WATCH — NO CLEAR CE/PE BIAS**.
+A manually requested PE/CE contradicting the price confirmation is
+marked **MANUAL CE/PE UNCONFIRMED**, without quote-derived targets.
+
+When a mapped ATM CE/PE contract has a security ID, positive bid/ask,
+reported trade volume and spread <= 5%, the read-only ATM panel can
+show hypothetical **option PREMIUM** entry = Dhan best ask,
+stop loss = ask - 20% of the ask (or bid/ask spread, whichever larger),
+T1 = entry + 1.5R and T2 = entry + 2.5R.
+These are **ILLUSTRATIVE**, *not live executable entries*. Dhan's chain
+does not independently verify a contract leg's exchange quote
+timestamp. At market close the plan is explicitly marked HISTORICAL.
+Historical win probability remains unavailable; option buyers face
+theta, IV, spreads, slippage and costs. This feature does **not**
+place broker orders or modify any original strategy gates.
+The existing legacy OI/PCR option study remains separately visible.
+
+### Windows deployment files
+- NEW `insights/atm_recommendation.py`
+- NEW `insights/tests/test_analyse_atm.py` (9 synthetic regression tests)
+- UPDATED `insights/analyse_workflow.py`
+- UPDATED `insights/service.py`
+- UPDATED `web/src/main.js`
+
+Stop and back up the local app first. Copy only these changed files
+from branch `feature/market-insights-web-20261109`. Do not overwrite
+the .env file, Dhan credentials, databases or calendars.
+
+```bat
+cd /d "H:\\BharatSignal_Fusion_Ready\\BharatSignal_Fusion_Insights"
+.venv\\Scripts\\python.exe -m unittest insights.tests.test_analyse_atm -v
+.venv\\Scripts\\python.exe -m unittest insights.tests.test_analyse_gann_wave -v
+.venv\\Scripts\\python.exe -m unittest discover -s tests -q
+.venv\\Scripts\\python.exe -m unittest discover -s insights\\tests -q
+cd web
+npm run build
+cd ..
+START_INSIGHTS.bat
+```
+
+UI: open Analyse, inspect 20+20 available quote movers, or type
+`BAJFINANCE` or select a mapped full name. The new ATM panel shows
+strike, expiry, option type, Dhan security ID, bid/ask/spread,
+direction source, and (only when valid) hypothetical PREMIUM entry,
+stop and targets. Inspect `GET
+/api/v1/market-insights/analyse?symbol=BAJFINANCE` and the
+`atm_recommendation` JSON object for unavailable reasons.
+Source work is committed, but Python unit tests and live Dhan
+integration must be verified on the Windows installation.
