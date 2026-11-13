@@ -213,6 +213,64 @@ function ReadinessPanel(){
 }
 
 
+
+function PremarketWatch({data={}}){
+ const headers=['Symbol','Previous day %','Close','20-day close break','Daily volume ratio','Watch score'];
+ const group=(title,items)=>e(Section,{title},
+  items.length?e('div',{className:'tablewrap'},e('table',{className:'research-table'},
+    e('thead',null,e('tr',null,...headers.map(h=>e('th',{key:h},h)))),
+    e('tbody',null,...items.map((x,i)=>{
+      const v=[x.symbol,x.previous_day_change_pct+'%',price(x.close),
+        x.closing_breakout?'UP BREAK':x.closing_breakdown?'DOWN BREAK':'NOT CONFIRMED',
+        x.volume_ratio==null?'—':x.volume_ratio+'×',x.score];
+      return e('tr',{key:i},...v.map((value,j)=>e('td',{key:j},value)));
+    })))):e('div',{className:'empty'},'No prior-session candidates verified.'));
+ return e('div',null,
+   e(Notice,{warning:true},'08:00 morning list uses the previous COMPLETED trading session. These are candidates, not CE/PE/stock buy or sell signals.'),
+   e('div',{className:'tile-grid'},
+      e(Tile,{title:'WATCHLIST STATE',value:data.status||'WAITING'}),
+      e(Tile,{title:'DAILY DATA DATE',value:data.previous_session||'—'}),
+      e(Tile,{title:'COVERAGE',value:data.assessed??'—',sub:'Sampled '+(data.universe??'—')+' of '+(data.available_instrument_master??'—')}),
+      e(Tile,{title:'DATA ERRORS',value:(data.unavailable_count??0)+(data.insufficient_history??0)})),
+   data.mixed_data_dates?e(Notice,{warning:true},'Multiple data session dates found; freshness needs checking.'):null,
+   e('div',{className:'analyse-selection-grid'},
+       group('Top previous-day gainers',data.gainers||[]),
+       group('Top previous-day losers',data.losers||[])),
+   e('p',{className:'small muted'},data.note||'Starts at 8:00 AM on an eligible session when app is running and broker history is accessible.'));
+}
+function OpeningOptionSetups({items=[]}){
+ const [index,setIndex]=useState(0);
+ const selected=items[Math.min(index,Math.max(0,items.length-1))]||null;
+ const names=['Underlying','Strategy','State','Side','CE trigger','PE trigger','Spot entry','Spot SL','Spot T1','Spot T2','Option status'];
+ const rows=items.map((x,i)=>{
+   const values=[x.underlying,x.strategy,x.state,x.side||'—',
+     x.trigger_ce??'—',x.trigger_pe??'—',x.spot_entry??'—',x.spot_sl??'—',
+     x.spot_t1??'—',x.spot_t2??'—',x.trade_status||'UNVERIFIED'];
+   return e('tr',{key:i},...values.map((v,j)=>e('td',{key:j},v)));
+ });
+ const table=e('table',{className:'research-table'},
+     e('thead',null,e('tr',null,...names.map(n=>e('th',{key:n},n)))),
+     e('tbody',null,...rows));
+ const chooser=e('select',{value:Math.min(index,Math.max(0,items.length-1)),
+      onChange:event=>setIndex(Number(event.target.value))},
+      ...items.map((x,i)=>e('option',{key:i,value:i},
+         (x.underlying||'Spot')+' · '+x.strategy)));
+ return e(React.Fragment,null,
+   e(Section,{title:'NEW · First 5m opening range + first red bar Fib'},
+     e('p',{className:'small muted'},'First 5m: 0=09:15 low, 1=09:15 high; above 1 CE, below 0 PE. Red bar: exclude 09:15 candle, use first later RED bar, Fib 0=HIGH and 1=LOW; above upper 0.44 CE, below lower 0.56 PE. Two completed 5m closes outside levels required. NO TRADE inside range/band.'),
+     items.length?e('div',{className:'tablewrap'},table):
+       e('div',{className:'empty'},'Awaiting verified 5-minute spot candles.')),
+   selected?e(Section,{title:'5m underlying chart · select instrument and strategy'},
+     chooser,
+     e('p',{className:'small muted'},'Reference: ',selected.reference_at||'—',
+       ' · ',selected.orientation||'—',' · ',selected.reason||'—'),
+     e('p',{className:'small muted'},'OI: ',selected.oi?.status||'UNAVAILABLE',
+       ' · option contract: ',selected.option_contract?
+         selected.option_contract.strike+' '+selected.option_contract.side:'NOT VERIFIED',
+       ' · quote freshness: NOT VERIFIED'),
+     e(PriceChart,{candles:selected.spot_candles||[],fib:selected.fib||null})
+   ):null);
+}
 function FibOptionSetups({items=[]}){
  const [active,setActive]=useState(0);
  const selected=items[Math.max(0,Math.min(active,items.length-1))]||null;
