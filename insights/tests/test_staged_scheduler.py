@@ -50,6 +50,26 @@ class SchedulingTests(unittest.TestCase):
                 self.assertEqual(service.scan_fo.call_count,5)
                 self.assertEqual(service.discover_shortlist.call_count,2)
 
+    def test_first5_redbar_rechecks_at_0935_without_duplicate_0930(self):
+        with tempfile.TemporaryDirectory() as folder:
+            svc=InsightsService(MinimalBroker(),folder)
+            svc.dashboard=Mock(return_value={})
+            svc.scan_index_options=Mock(return_value={})
+            svc.scan_fo=Mock(return_value={})
+            svc.discover_shortlist=Mock(return_value={})
+            svc.reconcile_outcomes=Mock(return_value=0)
+            at=lambda h,m:datetime(2026,11,12,h,m,tzinfo=IST)
+            with patch('insights.service._holiday_set',return_value=set()):
+                svc.run_due(at(9,30))
+                self.assertEqual(svc.scan_index_options.call_count,1)
+                self.assertEqual(svc.scan_fo.call_count,1)
+                svc.run_due(at(9,35))
+                self.assertEqual(svc.scan_index_options.call_count,2)
+                self.assertEqual(svc.scan_fo.call_count,2)
+                svc.run_due(at(9,36))
+                self.assertEqual(svc.scan_index_options.call_count,2)
+                self.assertEqual(svc.scan_fo.call_count,2)
+
     def test_holiday_makes_no_broker_calls(self):
         with tempfile.TemporaryDirectory() as folder:
             service=InsightsService(MinimalBroker(),folder)
