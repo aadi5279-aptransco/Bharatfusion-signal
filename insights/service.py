@@ -12,7 +12,7 @@ from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
-from insights.strategies import swing,multibagger,momentum_query,fib_smc,fib_oi
+from insights.strategies import swing,multibagger,momentum_query,fib_smc,fib_oi,opening_redbar,premarket
 from insights import ai_rank,cycle_wave,analyse_engine,swing_gann_wave
 
 DISCLAIMER='Rule-based research, not investment advice. Signals are not guaranteed; trading can cause significant losses. No orders are placed.'
@@ -48,9 +48,10 @@ class InsightsService:
         self._instruments=[];self._last_error='';self._timestamps={};self._snapshots={
           'dashboard':{'indices':[],'sectors':[],'status':'WAITING FOR DATA'},
           'intraday':{'signals':[],'buy_signals':[],'sell_signals':[],'status':'WAITING FOR 09:45 SHORTLIST'},
+          'pre-market':{'gainers':[],'losers':[],'status':'WAITING FOR 08:00 PRIOR-SESSION SCAN'},
           'btst':{'signals':[],'status':'WAITING FOR 15:00 IST SCAN'},
-          'index-options':{'signals':[],'fib_setups':[],'status':'WAITING FOR OPTION CHAIN'},
-          'fo-stocks':{'signals':[],'fib_setups':[],'status':'WAITING FOR FUTURES OI'},
+          'index-options':{'signals':[],'fib_setups':[],'opening_setups':[],'status':'WAITING FOR OPTION CHAIN'},
+          'fo-stocks':{'signals':[],'fib_setups':[],'opening_setups':[],'status':'WAITING FOR FUTURES OI'},
           'swing-trades':{'signals':[],'status':'WAITING FOR COMPLETED DAILY SCAN'},
           'multibagger':{'candidates':[],'status':'WAITING FOR COMPLETED DAILY SCAN'}}
         self._done=set();self._thread=None;self._stop=threading.Event()
@@ -526,6 +527,115 @@ class InsightsService:
         return dict(analyse_workflow.analyse(
             self,symbol,now,expiry,_holiday_set(),_norm),
             disclaimer=DISCLAIMER)
+
+    def scan_premarket(self,now):
+        """One 08:00 IST previous-session stock watchlist, never trade signals.
+
+        No current-session quotes or future daily candle is used. Run on
+        eligible market mornings only; bounded universe and no intraday
+        scanner cap changes. Results persist in read-only snapshot memory.
+        """
+        now=now.astimezone(IST)
+        all_stocks=[x for x in self.instruments() if x.get('kind')=='stock']
+        if WATCHLIST:
+            wanted={_norm(v) for v in WATCHLIST}
+            all_stocks=[x for x in all_stocks if _norm(x['symbol']) in wanted
+                        or _norm(x.get('ticker','')) in wanted]
+        try:maximum=max(1,min(250,int(os.getenv('INSIGHTS_PREMARKET_MAX_SYMBOLS','220'))))
+        except (ValueError,TypeError):maximum=220
+        # Sort by symbol only for deterministic sampling; mapped NSE
+        # F&O stock universe is small enough for near-complete coverage.
+        universe=sorted(all_stocks,key=lambda x:_norm(x['symbol']))[:maximum]
+        rows=[];unavailable=0;short=0
+        for item in universe:
+            try:
+                daily=self.broker.daily(item,now,days=180)
+                row=premarket.evaluate(daily,item['symbol'],now)
+                if row is None:short+=1;continue
+                row['instrument_id']=str(item.get('id',''))
+                rows.append(row)
+            except (BrokerUnavailable,ValueError,KeyError,TypeError,IndexError):
+                unavailable+=1
+        ranked=premarket.rank(rows,now.isoformat(),limit=10)
+        dates={x['previous_session'] for x in rows}
+        payload=dict(ranked,universe=len(universe),available_instrument_master=len(all_stocks),
+            assessed=len(rows),unavailable_count=unavailable,insufficient_history=short,
+            previous_session=max(dates) if dates else None,
+            mixed_data_dates=len(dates)>1,
+            status='08:00 PRIOR-SESSION WATCHLIST — NOT A TRADE' if rows
+                 else 'NO VERIFIED PRIOR-SESSION WATCHLIST DATA',
+            note='Based only on the latest completed daily bars. Previous-day movers and 20-day closing breakouts are identified separately. Not a promise of next-day direction.')
+        self._update('pre-market',payload,now)
+        return payload
+
+    def _opening_setups(self,item,now,cash_five=None):
+        """First-5m and first-red-bar directional watches, independent of OI gates.
+
+        Missing or contradicting option chain info never suppresses an
+        observed completed-candle watch. It does prevent option-readiness.
+        """
+        now=now.astimezone(IST)
+        try:
+            five=cash_five if cash_five is not None else self.broker.history(
+                item,now,minutes=5,lookback_days=3)
+            if not recent_frame(five,now,5,20):
+                return [dict(strategy=name,key=key,state='DATA_UNAVAILABLE',
+                             underlying=item['symbol'],side=None,
+                             reason='Missing fresh regular-session 5m underlying candles',
+                             quote_freshness='NOT VERIFIED')
+                        for key,name in (('first5',opening_redbar.FIRST),
+                                         ('redbar',opening_redbar.REDBAR))]
+        except (BrokerUnavailable,ValueError,KeyError,TypeError):
+            return [dict(strategy=name,key=key,state='DATA_UNAVAILABLE',
+                         underlying=item['symbol'],side=None,
+                         reason='Dhan 5m underlying history unavailable',
+                         quote_freshness='NOT VERIFIED')
+                    for key,name in (('first5',opening_redbar.FIRST),
+                                     ('redbar',opening_redbar.REDBAR))]
+        rows=opening_redbar.evaluate(five,now)
+        chart=five[(five.index.date==now.date())&
+                   (five.index+pd.Timedelta(minutes=5)<=pd.Timestamp(now))]
+        chart_candles=[dict(time=int(t.timestamp()),open=round(float(v.open),2),
+                            high=round(float(v.high),2),low=round(float(v.low),2),
+                            close=round(float(v.close),2))
+                       for t,v in chart.tail(78).iterrows()]
+        layer=cycle_wave.assess(five,now)
+        for row in rows:
+            row.update(underlying=item['symbol'],spot_candles=chart_candles,
+                       gann_wave=layer,
+                       premium_status='UNVERIFIED — SPOT LEVELS ARE NOT OPTION PREMIUM PRICES',
+                       trade_status=('SPOT DIRECTION WATCH — OPTIONS UNVERIFIED'
+                         if row.get('state')=='DIRECTION_READY'
+                         else 'WAITING / NO TRADE — NO VERIFIED OPTION ENTRY'))
+        qualified=[x for x in rows if x.get('state')=='DIRECTION_READY']
+        if not qualified:return rows
+        try:
+            expiries=self.broker.expiry_list(item)
+            expiry=next((x for x in sorted(expiries) if x>=now.date().isoformat()),None)
+            if not expiry:return rows
+            chain=self.broker.option_chain(item,expiry)
+            oc=chain.get('oc') if isinstance(chain,dict) else None
+            if not isinstance(oc,dict):return rows
+            strikes=[]
+            for strike,legs in oc.items():
+                try:val=float(strike)
+                except (ValueError,TypeError):continue
+                if val>0 and isinstance(legs,dict):strikes.append((val,legs))
+            if not strikes:return rows
+            for row in qualified:
+                near=min(strikes,key=lambda pair:abs(pair[0]-row['spot_price']))
+                leg=near[1].get(row['side'].lower()) or {}
+                if not isinstance(leg,dict) or not leg.get('security_id'):
+                    row['trade_status']='SPOT DIRECTION WATCH — OPTION CONTRACT UNAVAILABLE'
+                    continue
+                row['option_contract']=dict(strike=near[0],expiry=expiry,side=row['side'],
+                    security_id=str(leg['security_id']),symbol=item['symbol'])
+                row['trade_status']='SPOT DIRECTION WATCH — ATM CONTRACT FOUND, PREMIUM AGE UNVERIFIED'
+                row['oi']=fib_oi.chain_evidence(chain,row['side'],row['spot_price'])
+        except (BrokerUnavailable,ValueError,KeyError,TypeError,IndexError):
+            for row in qualified:
+                row['trade_status']='SPOT DIRECTION WATCH — OPTION CHAIN UNAVAILABLE'
+        return rows
 
     def _fib_setups(self,item,now,cash_five=None):
         """Independent 09:45 + 12:45 reference studies for spot/cash.
