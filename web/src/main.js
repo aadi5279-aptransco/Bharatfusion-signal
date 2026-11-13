@@ -24,6 +24,11 @@ function Signals({items=[],empty='No validated signals available.'}){
    s.mtf?e('p',{className:'small muted'},'Multi-timeframe: ',
      Object.entries(s.mtf).map(([k,v])=>k+' '+v).join(' · ')):null,
    s.order_flow_proxy?e('p',{className:'small muted'},'Flow evidence: ',s.order_flow_proxy):null,
+   s.gann_wave?e('p',{className:'small muted'},
+      'Gann levels ',s.gann_wave.gann?.support??'—',' / ',s.gann_wave.gann?.resistance??'—',
+      ' · Time cycles ',(s.gann_wave.time_cycle?.near_cycle_minutes||[]).join(', ')||'None',
+      ' · Swing-wave ',s.gann_wave.wave?.structure||'UNAVAILABLE',
+      ' · alignment ',s.wave_alignment||'UNAVAILABLE'):null,
    e(Badge,{type:'warning'},s.status||s.backtest_status||'RESEARCH ONLY'),
    (s.warnings||[]).length?e('p',{className:'small loss'},s.warnings.join(' · ')):null,
    e('details',null,e('summary',null,'Why this candidate?'),e('ul',null,...(s.reasons||['Awaiting qualifying rules']).map((v,j)=>e('li',{key:j},v)))))));
@@ -228,6 +233,9 @@ function FibOptionSetups({items=[]}){
    e('p',{className:'small muted'},'No-trade zone: ',x.no_trade_zone||'—',
        ' · Reference: ',x.reference?.interval||'—',' · Candle: ',x.reference?.color||'—'),
    e('p',{className:'small muted'},'SMC: ',x.smc?.reason||'Not confirmed'),
+   e('p',{className:'small muted'},'Gann support/resistance: ',
+      x.gann_wave?.gann?.support??'—',' / ',x.gann_wave?.gann?.resistance??'—',
+      ' · wave ',x.gann_wave?.wave?.structure||'UNAVAILABLE'),
    e('p',{className:'small muted'},'Chain OI: ',x.oi?.reason||'Not verified',
        ' · Futures: ',x.futures_oi?.reason||'Not verified'),
    e('p',{className:'small muted'},'Option premium: ',x.premium_status||'UNVERIFIED')));
