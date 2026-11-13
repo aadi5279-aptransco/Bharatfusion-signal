@@ -695,7 +695,7 @@ class InsightsService:
         return results
 
     def scan_index_options(self,now):
-        d=self.snapshot('dashboard');indices=d.get('indices',[]);signals=[];fib_setups=[]
+        d=self.snapshot('dashboard');indices=d.get('indices',[]);signals=[];fib_setups=[];opening_setups=[]
         # Independent of the previous trend score: an intraday Fib reversal
         # must not disappear simply because dashboard bias is Sideways.
         try:
@@ -709,6 +709,7 @@ class InsightsService:
             norm=_norm(item['symbol'])
             if norm in seen:continue
             seen.add(norm)
+            opening_setups.extend(self._opening_setups(item,now))
             fib_setups.extend(self._fib_setups(item,now))
         for idx in indices:
             if _norm(idx['symbol']) not in ('NIFTY','NIFTY50','BANKNIFTY','NIFTYBANK','SENSEX'):
@@ -753,16 +754,33 @@ class InsightsService:
             except (ValueError,BrokerUnavailable,KeyError):continue
         phase='PRELIMINARY 09:45' if (now.hour,now.minute)<(10,0) else 'FINAL 10:00'
         self._update('index-options',dict(signals=signals,fib_setups=fib_setups,
+              opening_setups=opening_setups,opening_ready=sum(x.get('state')=='DIRECTION_READY' for x in opening_setups),
               status=phase+' — RESEARCH ONLY (OPTION QUOTES UNVERIFIED)' if signals else phase+' — NO QUALIFIED INDEX OPTION SETUPS',
               phase=phase,scanned=len(indices),qualified=len(signals),mtf='5m+15m+60m',
               note='Rechecked every 5 minutes. Index direction requires 5m/15m/60m; index volume may be unavailable. Option OI/PCR are positioning proxies; premium age unverified; no trades placed'),now)
         return signals
 
     def scan_fo(self,now):
-        signals=[];unavailable=0;fib_setups=[]
+        signals=[];unavailable=0;fib_setups=[];opening_setups=[]
         selected=(list(self._shortlist) if self._shortlist_date==now.date().isoformat()
                   else [])
-        for item in selected[:10]:
+        # A 10:00 shortlist can be empty from very strict daily/volume
+        # rules. The option watch must not depend entirely on that gate.
+        # Prefer prior-session ranked symbols, then mapped F&O universe.
+        available={_norm(x['symbol']):x for x in self.instruments() if x.get('kind')=='stock'}
+        previous=self.snapshot('pre-market')
+        backups=[available.get(_norm(row.get('symbol','')))
+                 for row in (previous.get('gainers',[])+previous.get('losers',[]))]
+        sources=[x for x in (selected+backups+self._stock_list()) if x is not None]
+        picks=[];seen=set()
+        for item in sources:
+            key=(item.get('segment'),str(item.get('id')))
+            if key in seen:continue
+            seen.add(key);picks.append(item)
+            if len(picks)>=12:break
+        # Each pass scans no more than twelve mapped F&O underlyings.
+        for item in picks:
+            opening_setups.extend(self._opening_setups(item,now))
             fib_setups.extend(self._fib_setups(item,now))
             future=item.get('future')
             if not future:unavailable+=1;continue
@@ -804,10 +822,11 @@ class InsightsService:
             except (BrokerUnavailable,ValueError,KeyError):unavailable+=1
         phase='PRELIMINARY 09:45' if (now.hour,now.minute)<(10,0) else 'FINAL 10:00'
         self._update('fo-stocks',dict(signals=signals,fib_setups=fib_setups,
+              opening_setups=opening_setups,opening_ready=sum(x.get('state')=='DIRECTION_READY' for x in opening_setups),
               status=phase+' — RESEARCH ONLY (PREMIUM FRESHNESS UNKNOWN)' if signals else phase+' — NO QUALIFIED FUTURES/OI SETUPS',
-              phase=phase,scanned=len(selected[:10]),shortlisted=len(selected),
+              phase=phase,scanned=len(picks),shortlisted=len(selected),
               unavailable_count=unavailable,qualified=len(signals),mtf='15m+60m+Futures OI',
-              note='Rechecked every 5 minutes against locked stock shortlist. Futures OI and valid option chain mandatory; option premium is hypothetical'),now)
+              note='Opening 5m/redbar watches monitor a bounded F&O sample even if the strict shortlist is empty; old futures/MTF trade candidates stay separate. Premium and quote age unverified.'),now)
         return signals
 
     def reconcile_outcomes(self,now):
@@ -958,10 +977,26 @@ class InsightsService:
         regular_session=is_market_session(local.replace(hour=15,minute=20,second=0,microsecond=0),calendar)
         after_close=(regular_session
                      and (15,40)<=(local.hour,local.minute)<=(18,0))
-        if not is_market_session(now,calendar) and not after_close:
+        # At 08:00 or a later morning startup, use only PRIOR COMPLETED
+        # daily candles. No live 08:00 quote or pre-open trading is implied.
+        is_trading_day=is_market_session(local.replace(hour=10,minute=0,second=0,microsecond=0),calendar)
+        morning=(8,0)<=(local.hour,local.minute)<(9,15) and is_trading_day
+        if not is_market_session(now,calendar) and not after_close and not morning:
             return dict(status='BLOCKED — holiday calendar missing, weekend or outside trading hours')
         if not self._job_lock.acquire(blocking=False):
             return dict(status='SCAN ALREADY RUNNING')
+        if morning:
+            try:
+                key=(local.date().isoformat(),'premarket-8am')
+                if key in self._done:return dict(status='PRE-MARKET WATCHLIST ALREADY COMPLETE')
+                result=self.scan_premarket(local)
+                self._done.add(key)
+                return dict(status='PRE-MARKET WATCHLIST COMPLETE',
+                            assessed=result.get('assessed',0))
+            except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
+                with self._lock:self._last_error='premarket: '+str(exc)[:160]
+                return dict(status='PRE-MARKET WATCHLIST UNAVAILABLE')
+            finally:self._job_lock.release()
         if after_close:
             try:
                 key=(local.date().isoformat(),'longterm-daily')
@@ -980,8 +1015,12 @@ class InsightsService:
             # Broad stock discovery is ONLY at ~09:45 and ~10:00. Subsequent
             # monitoring only uses the locked shortlist.
             jobs=[
+                ('premarket-catchup',(9,15),lambda stamp:
+                    self.scan_premarket(stamp) if not self.snapshot('pre-market').get('assessed') else None),
                 ('dashboard',(9,20),self.dashboard),
                 ('shortlist-preview',(9,45),lambda stamp:self.discover_shortlist(stamp,final=False)),
+                ('index-options-first5',(9,30),self.scan_index_options),
+                ('fo-stocks-first5',(9,30),self.scan_fo),
                 ('index-options-preview',(9,45),self.scan_index_options),
                 ('fo-stocks-preview',(9,45),self.scan_fo),
                 ('shortlist-final',(10,0),lambda stamp:self.discover_shortlist(stamp,final=True)),
