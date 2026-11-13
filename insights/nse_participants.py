@@ -7,6 +7,7 @@ No claim of certainty, actual aggressor flow, or predictive win rate.
 from __future__ import annotations
 
 import csv
+from contextlib import contextmanager
 import hashlib
 import io
 import json
@@ -178,10 +179,21 @@ class ParticipantStore:
                 retrieved_at TEXT NOT NULL,
                 PRIMARY KEY(trade_date,kind,participant))""")
             db.execute("CREATE INDEX IF NOT EXISTS idx_participants_date ON participant_reports(trade_date)")
+    @contextmanager
     def _connect(self):
+        """Commit/rollback AND close SQLite on every code path.
+
+        sqlite3.Connection.__exit__ does not close a connection. On
+        Windows, lingering handles prevent TemporaryDirectory cleanup
+        and can lock the participant SQLite database after read/query.
+        """
         db=sqlite3.connect(str(self.path),timeout=8)
-        db.execute("PRAGMA busy_timeout=8000")
-        return db
+        try:
+            db.execute("PRAGMA busy_timeout=8000")
+            with db:
+                yield db
+        finally:
+            db.close()
     def complete(self,trade_day):
         with self._connect() as db:
             cur=db.execute("""SELECT kind,COUNT(*) FROM participant_reports
