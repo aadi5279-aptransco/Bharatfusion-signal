@@ -1015,8 +1015,6 @@ class InsightsService:
             # Broad stock discovery is ONLY at ~09:45 and ~10:00. Subsequent
             # monitoring only uses the locked shortlist.
             jobs=[
-                ('premarket-catchup',(9,15),lambda stamp:
-                    self.scan_premarket(stamp) if not self.snapshot('pre-market').get('assessed') else None),
                 ('dashboard',(9,20),self.dashboard),
                 ('shortlist-preview',(9,45),lambda stamp:self.discover_shortlist(stamp,final=False)),
                 ('index-options-first5',(9,30),self.scan_index_options),
