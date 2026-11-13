@@ -215,14 +215,16 @@ function ReadinessPanel(){
 
 
 function PremarketWatch({data={}}){
- const headers=['Symbol','Previous day %','Close','20-day close break','Daily volume ratio','Watch score'];
+ const headers=['Symbol','Previous day %','Close','20-day close break','Daily volume ratio','Watch score','Why selected'];
  const group=(title,items)=>e(Section,{title},
   items.length?e('div',{className:'tablewrap'},e('table',{className:'research-table'},
     e('thead',null,e('tr',null,...headers.map(h=>e('th',{key:h},h)))),
     e('tbody',null,...items.map((x,i)=>{
       const v=[x.symbol,x.previous_day_change_pct+'%',price(x.close),
         x.closing_breakout?'UP BREAK':x.closing_breakdown?'DOWN BREAK':'NOT CONFIRMED',
-        x.volume_ratio==null?'—':x.volume_ratio+'×',x.score];
+        x.volume_ratio==null?'—':x.volume_ratio+'×',x.score,
+        e('details',null,e('summary',null,'Rule evidence'),
+           e('ul',null,...(x.reasons||[]).map((reason,j)=>e('li',{key:j},reason))))];
       return e('tr',{key:i},...v.map((value,j)=>e('td',{key:j},value)));
     })))):e('div',{className:'empty'},'No prior-session candidates verified.'));
  return e('div',null,
@@ -490,7 +492,7 @@ function App(){
     active==='Multibagger'?e(MultibaggerResearch,{data}):null,
     ['Intraday','BTST','Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
      e(ReadinessPanel),
-     e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'09:45 Preview · 10:00 Final · 5m Follow-up':active==='BTST'?'Scheduled 15:00 IST':'Every 5 min after 10:00 · research'}),
+     e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'09:45 Preview · 10:00 Final · 5m Follow-up':active==='BTST'?'Scheduled 15:00 IST':'Opening 09:30 · every 5m · research'}),
        e(Tile,{title:['Index Options','F&O Stocks'].includes(active)?'SPOT WATCHES + LEGACY':'CANDIDATES',
            value:(data.signals||[]).length+(['Index Options','F&O Stocks'].includes(active)?(data.opening_ready||0):0),
            sub:active==='Intraday'?`BUY ${data.qualified_buy||0} · SELL ${data.qualified_sell||0}`:
