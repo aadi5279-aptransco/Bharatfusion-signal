@@ -103,5 +103,11 @@ def analyse(service,symbol,now,expiry,calendar,normalize):
        entry_plan=evidence.get('entry_plan'),
        bias=bias,probability_of_win=None,
        probability_status='UNAVAILABLE — NO CALIBRATED WALK-FORWARD MODEL',
-       status=evidence['status'],history_errors=history_errors,
+       # The top-level endpoint is still RESEARCH ONLY when option-chain
+       # metrics are present but the independent MTF price gate cannot
+       # establish a fresh trade. Never promote UNAVAILABLE to a signal.
+       status=('RESEARCH ONLY — NO VERIFIED PRICE ENTRY'
+               if metrics is not None and evidence['status'].startswith('UNAVAILABLE')
+               else evidence['status']),
+       history_errors=history_errors,
        note=note)
