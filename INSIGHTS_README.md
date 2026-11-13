@@ -496,3 +496,59 @@ versions yield a generic `Index`, causing `AttributeError` on
 Upgrade only `insights/brokers/dhan.py` and
 `insights/tests/test_spot_session_filter.py` from this branch.
 No React build, Dhan token, .env or order setting changes are needed.
+
+## Analyse top gainers/losers, MTF bias and Gann/time/wave evidence — November 2026
+
+**Analyse selections**: `GET /api/v1/market-insights/analyse/choices`
+returns the app's mapped indices plus up to 15 gainers and 15 losers in
+a single Dhan Market Quote batch, cached for 60 seconds. Previous-session
+close is the return baseline where the source provides Dhan quote
+`ohlc.close`; otherwise the record explicitly labels `SESSION_OPEN`.
+This is not a complete NSE/BSE gainer/loser universe. Outside market
+hours the ranking is marked stale.
+
+Cash/index **Analyse** no longer fails simply because a stock has no
+listed F&O chain. The analyser first retrieves recent completed 5m, 15m,
+60m cash/spot OHLCV and conditionally evaluates direction/entry levels.
+Expiry/option-chain metrics and resting-depth snapshots are optional
+additional evidence, not unverified substitutes for executed trade flow.
+`insights/analyse_engine.py` returns a bullish/bearish research tilt
+only on fully aligned 20/50 EMA three-timeframe trend; a conditional
+entry plan additionally needs a 20-bar breakout and a structure/ATR
+protective stop within 0.2%–3.0%. Research targets use 1.5R and 2.5R,
+with spot/cash prices **not option premium fills**.
+
+**No imaginary win probability:** `probability_of_win: null` and a
+corresponding `probability_status` remain until an eligible, timestamped,
+cost-aware walk-forward validation/calibration pipeline is supplied.
+A 0–100 heuristic score is not a predictive probability.
+
+**Gann/time/confirmed-wave independent layer**:
+`insights/cycle_wave.py` evaluates square-root increment support and
+resistance, 30/45/60/90/120/180-minute offsets relative to the 09:15
+IST regular-session anchor, and *confirmed* local price swing pivots.
+It is appended (not used to silently add gates) to **Intraday**, **Index
+Options**, **F&O Stocks**, and to the existing Fib research setup
+panels. It does NOT claim a validated Elliott 1-5/A-B-C count,
+forecasted reversal, institutional execution, or improved profitability.
+Absent/incomplete candles yield `UNAVAILABLE`.
+
+### Safe Windows update
+Back up and stop the current application first. Extract the current
+development branch ZIP elsewhere and copy ONLY:
+- `insights/cycle_wave.py` (new)
+- `insights/analyse_engine.py` (new)
+- `insights/analyse_workflow.py` (new)
+- `insights/tests/test_analyse_gann_wave.py` (new)
+- `insights/service.py` (updated)
+- `insights/api.py` (updated)
+- `insights/brokers/dhan.py` (updated)
+- `web/src/main.js` (updated)
+- `web/src/styles.css` (updated)
+
+Do not replace `.env`, holiday calendar, sector maps or SQLite
+data. Run both Python unittest suites, then `cd web && npm run build`
+and restart `START_INSIGHTS.bat`. Inspect
+`/api/v1/market-insights/analyse/choices` and a selected cash/index
+`/api/v1/market-insights/analyse?symbol=NIFTY`.
+The new changes require Windows test and live Dhan verification.
