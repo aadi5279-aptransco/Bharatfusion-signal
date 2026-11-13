@@ -100,6 +100,8 @@ class ATMTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             svc=InsightsService(AnalyseATMBroker(),directory)
             self.assertEqual(svc._lookup('BAJFINANCE')['id'],'317')
+            hints=svc.analyse_choices(NOW)['fno_symbols']
+            self.assertEqual(hints[0]['ticker'],'BAJFINANCE')
             r=svc.analyse('BAJFINANCE',NOW)
             self.assertEqual(r['symbol'],'BAJAJ FINANCE LIMITED')
             self.assertEqual(r['atm_recommendation']['atm_strike'],100)
