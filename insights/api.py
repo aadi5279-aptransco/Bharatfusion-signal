@@ -27,7 +27,7 @@ def create_app(service=None):
 
     @app.get('/api/v1/market-insights/<module>')
     def module(module):
-        if module not in ('dashboard','intraday','btst','index-options','fo-stocks','swing-trades','multibagger'):
+        if module not in ('dashboard','pre-market','intraday','btst','index-options','fo-stocks','swing-trades','multibagger'):
             return jsonify(error='Unknown Market Insights module'),404
         return jsonify(service.snapshot(module))
 
