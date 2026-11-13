@@ -31,6 +31,19 @@ def create_app(service=None):
             return jsonify(error='Unknown Market Insights module'),404
         return jsonify(service.snapshot(module))
 
+    @app.get('/api/v1/market-insights/fii-stock-deals')
+    def fii_stock_deals():
+        try:return jsonify(service.fii_stock_deals(datetime.now(IST)))
+        except (OSError,ValueError,RuntimeError):
+            return jsonify(status='FII DEAL HISTORY UNAVAILABLE',bought=[],sold=[],
+                data_scope='NSE disclosed bulk/block deals only'),503
+
+    @app.post('/api/v1/market-insights/fii-stock-deals/refresh')
+    def refresh_fii_stock_deals():
+        result=service.request_fii_deals_refresh(datetime.now(IST))
+        status=result.get('status')
+        return jsonify(result),202 if status=='STARTED' else 409 if status=='ALREADY RUNNING' else 429 if status=='ALREADY ATTEMPTED' else 503
+
     @app.get('/api/v1/market-insights/participant-positioning')
     def participant_positioning():
         try:return jsonify(service.participant_positioning(datetime.now(IST)))
