@@ -14,7 +14,7 @@ from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
-from insights.strategies import swing,multibagger,momentum_query,fib_smc,fib_oi,opening_redbar,premarket,btst_closing,swing_opportunities
+from insights.strategies import swing,multibagger,momentum_query,fib_smc,fib_oi,opening_redbar,premarket,btst_closing,swing_opportunities,swing_guide
 from insights import ai_rank,cycle_wave,analyse_engine,swing_gann_wave
 
 DISCLAIMER='Rule-based research, not investment advice. Signals are not guaranteed; trading can cause significant losses. No orders are placed.'
@@ -1141,7 +1141,18 @@ class InsightsService:
                 age=(now.date()-datetime.strptime(rank_date,'%Y-%m-%d').date()).days
                 if age<0 or age>45:rank_rows={}
             except (ValueError,TypeError):rank_rows={}
-        swing_rows=[];multi_rows=[];opportunity_rows=[]
+        swing_rows=[];multi_rows=[];opportunity_rows=[];guide_rows=[]
+        # One historical NIFTY benchmark fetch per daily batch, not one
+        # API request per candidate. Do not invent relative strength if
+        # licensed benchmark candles are absent.
+        benchmark=None
+        try:
+            nifty_item=next((x for x in self.instruments()
+              if x.get('kind')=='index' and _norm(x['symbol']) in ('NIFTY','NIFTY50')),None)
+            if nifty_item is not None:
+                benchmark=self.broker.daily(nifty_item,now,days=1300)
+        except (BrokerUnavailable,ValueError,KeyError,TypeError,IndexError):
+            benchmark=None
         # Attributable disclosed NSE deals are optional *context* only:
         # no full-market FII flows are inferred from bulk/block trades.
         try:
@@ -1164,6 +1175,9 @@ class InsightsService:
                 # daily swing signal eligibility, entry, stop or 2R/3R.
                 swing_matches=swing.scan(daily,item['symbol'],now)
                 opportunity=swing_opportunities.evaluate(daily,item['symbol'],now)
+                guide=swing_guide.evaluate(daily,item['symbol'],now,benchmark=benchmark)
+                if guide.get('matched_setups'):
+                    guide_rows.append(guide)
                 include_opportunity=(opportunity['status']!='UNAVAILABLE' and
                     opportunity['setup']!='NO BULLISH SETUP')
                 if swing_matches or include_opportunity:
@@ -1193,6 +1207,11 @@ class InsightsService:
                 if result is not None:multi_rows.append(result)
             except (BrokerUnavailable,ValueError,KeyError,TypeError,IndexError):
                 failures+=1
+        swing_guide.rank(guide_rows)
+        guide_rows.sort(key=lambda x:(
+            0 if x.get('readiness')=='CONDITIONAL RESEARCH' else 1,
+            -(x.get('rs_score') if x.get('rs_score') is not None else -999),
+            x['symbol']))
         opportunity_rows.sort(key=lambda x:(
             0 if x.get('readiness')=='READY' else 1,
             -(x.get('score') or 0),x['symbol']))
@@ -1214,6 +1233,12 @@ class InsightsService:
             opportunity_watch=watch_opps,
             opportunity_count=len(opportunity_rows),
             opportunity_version=swing_opportunities.VERSION,
+            guide_layer=guide_rows[:50],
+            guide_layer_count=len(guide_rows),
+            guide_layer_conditional=sum(x.get('readiness')=='CONDITIONAL RESEARCH' for x in guide_rows),
+            guide_layer_version=swing_guide.VERSION,
+            guide_benchmark_status='NIFTY DAILY HISTORY AVAILABLE' if benchmark is not None else 'NIFTY BENCHMARK UNAVAILABLE',
+            guide_rs_universe='RANKED ONLY WITHIN SAMPLED MAPPED CASH UNIVERSE',
             status='DAILY SWING RESEARCH COMPLETE',
             **meta),now)
         self._update('multibagger',dict(
@@ -1224,7 +1249,8 @@ class InsightsService:
             rs_rank_source='LOCAL DATED REFERENCE' if rank_rows else 'UNVERIFIED',
             available_eligibility=sum(row['eligible'] for row in multi_rows),
             **meta),now)
-        return dict(swing_count=len(swing_rows),swing_opportunity_ready=len(ready_opps),
+        return dict(swing_count=len(swing_rows),swing_guide_matches=len(guide_rows),
+                    swing_opportunity_ready=len(ready_opps),
                     swing_opportunity_watch=len(watch_opps),
                     multibagger_count=len(multi_rows),
                     unavailable_count=failures,insufficient_history=insufficient)
