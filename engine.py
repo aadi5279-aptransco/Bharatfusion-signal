@@ -65,7 +65,13 @@ def analyze(frame, symbol, kind='stock', minutes=3, now=None, threshold=75):
     result = dict(symbol=symbol,kind=kind,action='WAIT',score=0,close=None,entry=None,stop=None,t1=None,t2=None,
                   candle='',bias='WARMUP',reasons=[],blockers=[],chart=[],htf={})
     if len(b)<60:
-        result['blockers']=['Need at least 60 complete entry-timeframe candles']; return result
+        # Fail closed with *all* applicable blockers. Weekend/out-of-window
+        # status must remain visible even when history is too short to score.
+        result['blockers']=['Need at least 60 complete entry-timeframe candles']
+        minute=now.hour*60+now.minute
+        if now.weekday()>=5 or not 9*60+30<=minute<15*60:
+            result['blockers'].append('Outside entry window 09:30–15:00 IST weekdays')
+        return result
     f=features(b); x=f.iloc[-1]; stamp=f.index[-1]
     result.update(close=float(x.close),candle=stamp.isoformat(),chart=[{'time':t.isoformat(),**{k:float(v) for k,v in row.items()}} for t,row in b.tail(90).iterrows()])
     htf={}
