@@ -1124,15 +1124,22 @@ class InsightsService:
                         except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
                             with self._lock:self._last_error=f'intraday: {str(exc)[:160]}'
                     self._done.add(key)
-                # Re-evaluate option setups on every completed five-minute
-                # clock boundary after final discovery. No full stock-universe
-                # sweep; index list is fixed and F&O uses the locked shortlist.
-                # The common job lock serializes Dhan chain requests.
-                if minute>=10*60+5:
+                # Re-evaluate opening first5 and redbar direction watches
+                # every completed 5m clock boundary from 09:30 onward.
+                # The stock sample is bounded and does not repeat broad
+                # 09:45 / 10:00 discovery. Avoid double calls at the
+                # explicitly scheduled 09:30, 09:45 and 10:00 checkpoints.
+                if minute>=9*60+30:
                     for name,job in (
                         ('index-options-monitor',self.scan_index_options),
                         ('fo-stocks-monitor',self.scan_fo),
                     ):
+                        corresponding=(
+                            ('index-options-first5','index-options-preview','index-options')
+                            if name=='index-options-monitor' else
+                            ('fo-stocks-first5','fo-stocks-preview','fo-stocks'))
+                        if any(n in completed for n in corresponding):
+                            continue
                         key=(date,name,minute//5)
                         if key in self._done:
                             continue
