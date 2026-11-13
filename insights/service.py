@@ -507,49 +507,24 @@ class InsightsService:
         self._update('btst',data,now)
         return data
 
-    def analyse(self,symbol,now=None,expiry=None):
+    def analyse_choices(self,now=None):
+        """Cached one-batch mover selection, never a full-universe candle scan."""
+        from insights import analyse_workflow
         now=now or datetime.now(IST)
-        if len(symbol)>64 or not symbol.strip():raise ValueError('Invalid symbol')
-        match=re.fullmatch(r'(.+?)\s+(\d+(?:\.\d+)?)\s+(CE|PE)',symbol.strip(),re.I)
-        underlying=match.group(1) if match else symbol.strip()
-        requested_strike=float(match.group(2)) if match else None
-        requested_side=match.group(3).upper() if match else None
-        item=self._lookup(underlying)
-        if not item:raise ValueError('Symbol not found in Dhan instrument master')
-        expiries=self.broker.expiry_list(item)
-        valid=[x for x in sorted(expiries) if x>=now.date().isoformat()]
-        if expiry is not None and expiry not in valid:raise ValueError('Expiry is not available')
-        if not valid:raise ValueError('No current expiry')
-        selected=expiry or valid[0];chain=self.broker.option_chain(item,selected)
-        m=options.chain_metrics(chain)
-        bias='Uptrend' if m['pcr']>=1.2 else 'Downtrend' if m['pcr']<=.8 else 'Sideways'
-        plan=None;note='PCR is a positioning proxy, not proof of direction.'
-        if bias!='Sideways' or requested_side:
-            try:plan=options.option_plan(chain,item['symbol'],bias,selected,now,side_override=requested_side,requested_strike=requested_strike)
-            except ValueError as exc:note=str(exc)
-        candles=[];mtf={};price_asof=None
-        try:
-            f=self.broker.history(item,now,minutes=5)
-            price_asof=f.index[-1].isoformat()
-            mtf['5m']=advanced_smc.trend(f)
-            candles=[dict(time=int(t.timestamp()),open=float(r.open),high=float(r.high),low=float(r.low),close=float(r.close)) for t,r in f.tail(120).iterrows()]
-            for interval,days,key in ((15,12,'15m'),(60,30,'60m')):
-                h=self.broker.history(item,now,minutes=interval,lookback_days=days)
-                mtf[key]=advanced_smc.trend(h)
-        except (BrokerUnavailable,ValueError,KeyError):pass
-        market_depth={'status':'UNAVAILABLE — RESTING DEPTH NOT VERIFIED'}
-        if is_market_session(now,_holiday_set()) and hasattr(self.broker,'depth_snapshots'):
-            try:
-                ds=self.broker.depth_snapshots([item],now).get(str(item['id']))
-                if ds and ds.get('verified'):
-                    market_depth={'status':'VERIFIED RESTING BOOK SNAPSHOT — NOT EXECUTED DELTA',
-                                  'bid_ask_ratio':ds['bid_ask_ratio'],
-                                  'last_trade_time':ds.get('last_trade_time')}
-            except (BrokerUnavailable,ValueError,KeyError,TypeError):pass
-        return dict(symbol=item['symbol'],expiry=selected,expiries=valid[:15],spot=chain.get('last_price'),candles=candles,
-             price_asof=price_asof,mtf=mtf,market_depth=market_depth,
-             order_flow_proxy='OPTION OI CHANGES AND RESTING BOOK DEPTH; NOT TAPE DELTA',
-             bias=bias,metrics=m,plan=plan,status='RESEARCH ONLY — CONTRACT QUOTE FRESHNESS NOT VERIFIED',note=note,disclaimer=DISCLAIMER)
+        tick=time.monotonic()
+        with self._lock:
+            if tick-self._analyse_choices_cache[0]<60:
+                return dict(self._analyse_choices_cache[1])
+        result=analyse_workflow.choices(self,now,_holiday_set())
+        with self._lock:self._analyse_choices_cache=(tick,result)
+        return dict(result)
+
+    def analyse(self,symbol,now=None,expiry=None):
+        from insights import analyse_workflow
+        now=now or datetime.now(IST)
+        return dict(analyse_workflow.analyse(
+            self,symbol,now,expiry,_holiday_set(),_norm),
+            disclaimer=DISCLAIMER)
 
     def _fib_setups(self,item,now,cash_five=None):
         """Independent 09:45 + 12:45 reference studies for spot/cash.
