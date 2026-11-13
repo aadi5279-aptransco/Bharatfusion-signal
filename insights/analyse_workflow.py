@@ -9,6 +9,16 @@ from insights import analyse_engine,atm_recommendation
 from insights.strategies import options
 
 
+
+def _mapped_fno_ticker(item):
+    """Search hint from the same Dhan-mapped future alias as service._lookup."""
+    ticker=str(item.get('ticker') or '').strip()
+    if ticker:return ticker
+    future=item.get('future') or {}
+    name=str(future.get('symbol') or '')
+    return name.split('-')[0] if '-FUT' in name.upper() else ''
+
+
 def choices(service, now, calendar):
     now=now.astimezone(IST)
     all_items=service.instruments()
@@ -33,7 +43,7 @@ def choices(service, now, calendar):
         losers=sorted((x for x in rows if x['change_pct']<0),
                       key=lambda x:x['change_pct'])[:20],
         indices=indices,
-        fno_symbols=[dict(symbol=x['symbol'],ticker=x.get('ticker',''),
+        fno_symbols=[dict(symbol=x['symbol'],ticker=_mapped_fno_ticker(x),
                           instrument_id=str(x.get('id','')))
                      for x in sorted(stocks,key=lambda v:v['symbol'])],
         coverage=len(rows),universe=len(stocks),
