@@ -13,7 +13,7 @@ from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
 from insights.strategies import swing,multibagger,momentum_query,fib_smc,fib_oi
-from insights import ai_rank,cycle_wave,analyse_engine
+from insights import ai_rank,cycle_wave,analyse_engine,swing_gann_wave
 
 DISCLAIMER='Rule-based research, not investment advice. Signals are not guaranteed; trading can cause significant losses. No orders are placed.'
 
@@ -796,7 +796,16 @@ class InsightsService:
                 if daily is None or len(daily)<260:
                     insufficient+=1
                     continue
-                swing_rows.extend(swing.scan(daily,item['symbol'],now))
+                # Independent daily/weekly evidence; do not change existing
+                # daily swing signal eligibility, entry, stop or 2R/3R.
+                swing_matches=swing.scan(daily,item['symbol'],now)
+                if swing_matches:
+                    gann_layer=swing_gann_wave.assess(daily,now)
+                    for candidate in swing_matches:
+                        enriched=dict(candidate)
+                        enriched['swing_gann_wave']=gann_layer
+                        enriched['gann_wave_alignment']=gann_layer['alignment']
+                        swing_rows.append(enriched)
                 rank=rank_rows.get(item['symbol']) if isinstance(rank_rows,dict) else None
                 result=multibagger.evaluate(
                     daily,item['symbol'],daily.index[-1].date().isoformat(),
