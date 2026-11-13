@@ -12,7 +12,7 @@ import threading
 from datetime import datetime,date,timedelta
 
 from insights.config import IST,is_market_session
-from insights.nse_participants import ParticipantStore,ParticipantError,fetch_csv
+from insights.nse_participants import ParticipantStore,ParticipantError,NSEAccessDenied,fetch_csv
 
 VERSION="participant-fetch-v1"
 
@@ -107,6 +107,9 @@ class ParticipantRefresh:
                 vol=self.fetcher("vol",day)
                 self.store.save(day,oi,vol,t.isoformat())
                 saved.append(day.isoformat())
+            except NSEAccessDenied as exc:
+                failed.append(dict(day=day.isoformat(),reason=str(exc)[:105]))
+                break
             except (ParticipantError,OSError,ValueError,TimeoutError) as exc:
                 failed.append(dict(day=day.isoformat(),reason=str(exc)[:105]))
         # When there were no missing sessions the latest already-persisted
