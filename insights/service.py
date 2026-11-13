@@ -13,7 +13,7 @@ from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
 from insights.strategies import swing,multibagger,momentum_query,fib_smc,fib_oi
-from insights import ai_rank
+from insights import ai_rank,cycle_wave,analyse_engine
 
 DISCLAIMER='Rule-based research, not investment advice. Signals are not guaranteed; trading can cause significant losses. No orders are placed.'
 
@@ -69,6 +69,7 @@ class InsightsService:
         self._discovery_errors=0
         self._discovery_missing_structure=0
         self._intraday_daily_cache={}
+        self._analyse_choices_cache=(0,{})
         self._manual_requested_at=0.0
         self._manual_thread=None
         self._manual_refresh=dict(status='IDLE')
