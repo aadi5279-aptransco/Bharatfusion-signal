@@ -146,6 +146,15 @@ class NSEParticipantTests(unittest.TestCase):
             self.assertEqual(failure["status"],"PARTIAL — TARGET NSE REPORT NOT AVAILABLE")
             self.assertTrue(worker.store.complete(self.day))
             self.assertEqual(worker.summary(self.now)["trade_date"],self.day.isoformat())
+    def test_nse_403_stops_batch_without_hammering_archive(self):
+        with tempfile.TemporaryDirectory() as p:
+            fetcher=Mock(side_effect=nse.NSEAccessDenied("HTTP 403"))
+            worker=ParticipantRefresh(Path(p),lambda:set(),fetcher=fetcher)
+            result=worker.sync(self.now,max_dates=6)
+            self.assertEqual(result["saved_count"],0)
+            self.assertEqual(len(result["failed_dates"]),1)
+            self.assertEqual(fetcher.call_count,1)
+
     def test_no_holiday_calendar_fails_closed_without_network(self):
         with tempfile.TemporaryDirectory() as p:
             fetcher=Mock()
