@@ -1086,8 +1086,9 @@ class InsightsService:
             jobs=[
                 ('dashboard',(9,20),self.dashboard),
                 ('shortlist-preview',(9,45),lambda stamp:self.discover_shortlist(stamp,final=False)),
-                ('index-options-first5',(9,30),self.scan_index_options),
-                ('fo-stocks-first5',(9,30),self.scan_fo),
+                # Opening CE/PE research begins at 09:30 through the
+                # normal five-minute option monitor below; do not add
+                # a second one-off 09:30 job here.
                 ('index-options-preview',(9,45),self.scan_index_options),
                 ('fo-stocks-preview',(9,45),self.scan_fo),
                 ('shortlist-final',(10,0),lambda stamp:self.discover_shortlist(stamp,final=True)),
@@ -1102,11 +1103,10 @@ class InsightsService:
                     continue
                 # A late startup must not replay a fictitious 09:45 preview
                 # and then repeat the full scan at 10:00.
-                if (name.endswith('-preview') and (now.hour,now.minute)>=(10,0)
-                    or name.endswith('-first5') and (now.hour,now.minute)>(9,30)):
-                    # Do not run a fictitious 09:30 opening scan at a
-                    # late startup. The normal 5-minute monitor handles
-                    # 09:35/09:40; 09:45 and 10:00 have dedicated scans.
+                if name.endswith('-preview') and (now.hour,now.minute)>=(10,0):
+                    # Do not run a fictitious 09:45 preview at a late
+                    # startup: the 10:00 final and option monitor take
+                    # over at their scheduled completed-candle times.
                     self._done.add(key)
                     continue
                 try:
@@ -1137,20 +1137,19 @@ class InsightsService:
                         except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
                             with self._lock:self._last_error=f'intraday: {str(exc)[:160]}'
                     self._done.add(key)
-                # Re-evaluate opening first5 and redbar direction watches
-                # every completed 5m clock boundary from 09:30 onward.
-                # The stock sample is bounded and does not repeat broad
-                # 09:45 / 10:00 discovery. Avoid double calls at the
-                # explicitly scheduled 09:30, 09:45 and 10:00 checkpoints.
+                # Opening 5m and redbar watches use ONE scheduler route
+                # from 09:30, every completed five-minute boundary.
+                # At 09:45 and 10:00, the existing preview/final jobs
+                # take precedence, so the monitor cannot call them twice.
                 if minute>=9*60+30:
                     for name,job in (
                         ('index-options-monitor',self.scan_index_options),
                         ('fo-stocks-monitor',self.scan_fo),
                     ):
                         corresponding=(
-                            ('index-options-first5','index-options-preview','index-options')
+                            ('index-options-preview','index-options')
                             if name=='index-options-monitor' else
-                            ('fo-stocks-first5','fo-stocks-preview','fo-stocks'))
+                            ('fo-stocks-preview','fo-stocks'))
                         if any(n in completed for n in corresponding):
                             continue
                         key=(date,name,minute//5)
