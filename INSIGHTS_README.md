@@ -1017,3 +1017,70 @@ Inspect `/api/v1/market-insights/swing-trades` for the new
 `/api/v1/market-insights/fii-stock-deals` for sourced FII transactions.
 All revisions require the Windows test/build and production-data
 verification; source commits alone do not establish a profitable edge.
+
+## Additional Swing Trades layer — PDF swing guide (2026-11)
+
+The uploaded `Swing_Trading_Strategies_India_Python.pdf` is the
+basis for **one new, separate Swing Trades panel**. It does NOT
+replace or alter the existing daily Swing Signals, daily+weekly
+Opportunity Finder, or Gann/wave research. It runs in the existing
+**15:40+ IST completed-daily longterm batch**, with bounded
+`INSIGHTS_LONGTERM_MAX_SYMBOLS` coverage, not on every 5m tick.
+
+`insights/strategies/swing_guide.py` implements the PDF's:
+1. Trend pullback to EMA20, above 200-SMA, EMA20>EMA50, bullish
+   bounce, RSI14 40–60.
+2. Previous-day 15-session tight base (<12% range) and breakout
+   above previous 20-session high on >=1.5x **shifted prior** 20-day
+   average volume, strong close near the day's high.
+3. Oversold RSI(2)<10 in a long-term uptrend above 200-SMA and
+   not more than 3% below EMA50.
+4. Relative-strength **ranking filter**: equally weighted relative
+   63- and 126-session price performance versus the downloaded
+   NIFTY daily benchmark. One daily benchmark fetch is shared
+   across the scan; missing or unaligned reference data results
+   in WATCH, not a fabricated relative-strength pass.
+5. Volatility squeeze release: yesterday's Bollinger width at/below
+   the bottom 15% of its recent 120-session distribution followed
+   by an upper-band close on >=1.2x prior volume above EMA50.
+
+Eligibility checks: price >= ₹50, prior 20-day mean traded value
+>= ₹5 crore, >=220 completed daily candles, and NIFTY RS ranked
+within the top 30% of only the **sampled mapped Dhan universe**.
+This is NOT a verified NIFTY 500 entire-universe rank.
+
+Conditional cash-stock next-session entry is > signal high
+(0.1% buffer), risk uses two times previous-completed-bar ATR14,
+and the illustrative target is 2R. Stop-distance guard is <=15%.
+The model does not infer fills, quantity, portfolio sizing or
+winning probability. Corporate results, ex-dividend, surveillance,
+news and execution gaps are explicitly UNVERIFIED. The RSI2
+strategy has a separate 2–6-session expected holding period and
+time/RSI exit notes, but it is not automatically sold/executed.
+
+**Files:**
+- NEW `insights/strategies/swing_guide.py`
+- NEW `insights/tests/test_swing_guide.py`
+- UPDATED `insights/service.py`
+- UPDATED `web/src/main.js`
+
+Stop, back up and copy these four files from the branch. Keep
+`.env`, SQLite research files and Dhan settings unchanged.
+Run all Python tests and `web/npm run build`, and open the
+existing Swing Trades tab to see the extra four-setup table.
+
+```bat
+cd /d "H:\\BharatSignal_Fusion_Ready\\BharatSignal_Fusion_Insights"
+.venv\\Scripts\\python.exe -m unittest insights.tests.test_swing_guide -v
+.venv\\Scripts\\python.exe -m unittest discover -s tests -q
+.venv\\Scripts\\python.exe -m unittest discover -s insights\\tests -q
+cd web
+npm run build
+cd ..
+START_INSIGHTS.bat
+```
+
+The source changes and frontend JavaScript syntax checks are
+committed. Windows unit tests, frontend production build, live
+Dhan daily data and predictive performance remain unverified
+until exercised on the user's local installation.
