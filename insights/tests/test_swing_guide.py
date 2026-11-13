@@ -57,7 +57,7 @@ class PDFSwingTests(unittest.TestCase):
         now=pd.Timestamp('2026-11-13 16:00',tz=IST)
         self.assertEqual(swing_guide.evaluate(None,'TEST',now)['status'],'UNAVAILABLE')
         self.assertEqual(swing_guide.evaluate(f.iloc[:80],'TEST',now)['status'],'UNAVAILABLE')
-        future=n.copy();future.index=future.index+pd.Timedelta(days=1)
+        future=n.copy();future.index=future.index+pd.Timedelta(days=500)
         # No benchmark value for the stock's latest completed date.
         result=swing_guide.evaluate(f,'DEMO',now,benchmark=future)
         self.assertIsNone(result['entry'])
