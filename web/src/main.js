@@ -169,9 +169,9 @@ function Analyse({data,onSearch,busy}){
   m?e(React.Fragment,null,
     e('div',{className:'tile-grid'},e(Tile,{title:'OPEN-INTEREST PCR',value:m.pcr}),e(Tile,{title:'MAX PAIN',value:m.max_pain}),e(Tile,{title:'OI SUPPORT',value:m.oi_support}),e(Tile,{title:'OI RESISTANCE',value:m.oi_resistance})),
     e(Section,{title:'Multi-timeframe trend and flow proxies'},
-      e('p',{className:'small muted'},'5m trend: ',data.mtf?.['5m']||'UNAVAILABLE',
-        ' · 15m trend: ',data.mtf?.['15m']||'UNAVAILABLE',
-        ' · 60m trend: ',data.mtf?.['60m']||'UNAVAILABLE'),
+      e('p',{className:'small muted'},'5m trend: ',data.mtf?.['5m']?.trend||'UNAVAILABLE',
+        ' · 15m trend: ',data.mtf?.['15m']?.trend||'UNAVAILABLE',
+        ' · 60m trend: ',data.mtf?.['60m']?.trend||'UNAVAILABLE'),
       e('p',{className:'small muted'},'Last price candle: ',data.price_asof||'Unknown',
         ' · Dhan depth: ',data.market_depth?.status||'UNAVAILABLE',
         data.market_depth?.bid_ask_ratio!=null?' · Resting bid/ask ratio '+data.market_depth.bid_ask_ratio:''),
@@ -179,7 +179,8 @@ function Analyse({data,onSearch,busy}){
     e(Section,{title:`Completed 5-minute price candles · ${data.symbol}`},e(PriceChart,{candles:data.candles||[]})),
     e('div',{className:'split'},e(Section,{title:`Option-chain OI · ${data.symbol} · ${data.expiry}`},e(OiChart,{strikes:m.strikes})),
      e(Section,{title:'OI interpretation'},e('p',null,`Rule-based tilt: ${data.bias||'Undetermined'}`),e('p',{className:'muted'},data.note),e('p',null,`Call OI Δ: ${m.call_change?.toLocaleString('en-IN')} · Put OI Δ: ${m.put_change?.toLocaleString('en-IN')}`),e(Notice,{warning:true},m.iv_percentile_note),e(Signals,{items:data.plan?[data.plan]:[],empty:'No validated entry/target/stop plan for this option chain.'}))))
-   :e(Notice,null,'Search a mapped Dhan instrument. Option-chain metrics are retrieved only on request; no NSE website scraping.'));
+   :data.symbol?e(Notice,null,'Optional option-chain unavailable. Underlying price research remains shown above.'):
+     e(Notice,null,'Choose a mapped index or mover, or search a Dhan instrument. Quotes are retrieved only on request.'));
 }
 function TrackRecord({data}){
  const stats=data.stats||[],signals=data.signals||[];
