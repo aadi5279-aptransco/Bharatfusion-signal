@@ -1147,7 +1147,9 @@ class InsightsService:
         # licensed benchmark candles are absent.
         benchmark=None
         try:
-            nifty_item=next((x for x in self.instruments()
+            benchmark_items=(self.instruments()
+                if callable(getattr(self.broker,'instruments',None)) else [])
+            nifty_item=next((x for x in benchmark_items
               if x.get('kind')=='index' and _norm(x['symbol']) in ('NIFTY','NIFTY50')),None)
             if nifty_item is not None:
                 benchmark=self.broker.daily(nifty_item,now,days=1300)
@@ -1455,3 +1457,4 @@ class InsightsService:
         self._thread=threading.Thread(target=loop,daemon=True,name='MarketInsightsScheduler');self._thread.start()
 
     def stop(self):self._stop.set()
+
