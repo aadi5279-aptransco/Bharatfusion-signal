@@ -43,3 +43,17 @@
 .fib-evidence p{line-height:1.5}
 .section select{max-width:100%;background:var(--panel2);color:var(--ink);
  border:1px solid var(--line);border-radius:8px;padding:8px 11px;margin:7px}
+
+/* Analyse: batch-mapped movers and broad cash/index research */
+.analyse-picker-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:8px 0}
+.analyse-picker-head button{cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--ink);border-radius:9px;padding:8px 13px}
+.analyse-selection-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:15px 0}
+.analyse-selection-grid .section{min-width:0}
+.analyse-choices{display:flex;flex-direction:column;gap:5px;max-height:300px;overflow-y:auto}
+.mover-button{background:var(--panel2);border:1px solid var(--line);border-radius:7px;color:var(--ink);display:flex;gap:8px;align-items:center;justify-content:space-between;text-align:left;cursor:pointer;padding:9px 10px;font-size:12px}
+.mover-button strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mover-button:hover{border-color:var(--accent)}
+.mover-button:focus-visible{outline:2px solid var(--accent)}
+.mover-button .gain{color:var(--green)}
+.mover-button .loss{color:var(--red)}
+@media(max-width:880px){.analyse-selection-grid{grid-template-columns:1fr}}
