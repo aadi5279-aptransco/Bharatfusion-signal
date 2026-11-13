@@ -17,8 +17,9 @@ NOW=datetime(2026,11,13,9,30,tzinfo=IST)
 def five_bars(down=False):
     idx=pd.date_range('2026-11-13 09:15',periods=3,freq='5min',tz=IST)
     close=[100.,98.,97.] if down else [100.,102.,103.]
-    return pd.DataFrame(dict(open=[100.]*3,high=[101.,103.,104.] if not down else [101.,100.,99.],
-        low=[99.,101.,102.] if not down else [99.,97.,96.],
+    return pd.DataFrame(dict(open=[100.,101.,102.] if not down else [100.,99.,98.],
+        high=[101.,103.,104.] if not down else [101.,100.,99.],
+        low=[99.,100.,101.] if not down else [99.,97.,96.],
         close=close,volume=[1000]*3),index=idx)
 
 
