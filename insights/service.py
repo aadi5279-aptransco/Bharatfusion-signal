@@ -414,6 +414,7 @@ class InsightsService:
                                   quote_freshness='COMPLETED 5m+15m INPUTS; PROVISIONAL DAILY',
                                   data_asof=five.index[-1].isoformat(),
                                   backtest_status='UNVALIDATED')
+                    result=cycle_wave.annotate(result,five,now)
                     self.journal.record(result)
                     (buy if side=='BUY' else sell).append(result)
                     qualified=True
@@ -541,6 +542,8 @@ class InsightsService:
             if not recent_frame(five,now,5,20):return []
         except (BrokerUnavailable,ValueError,KeyError,TypeError):return []
         setups=[fib_smc.evaluate(five,now,key) for key in ('0945','1245')]
+        layer=cycle_wave.assess(five,now)
+        for setup in setups:setup['gann_wave']=layer
         # A compact SPOT/CASH candlestick chart, never a futures/options
         # proxy. Return completed current-session bars only.
         chart=five[(five.index.date==now.date())&
@@ -635,7 +638,7 @@ class InsightsService:
                                  choch_up=smc['choch_up'],choch_down=smc['choch_down'],
                                  fvg_up=smc['fvg_up'],fvg_down=smc['fvg_down'],
                                  rvol=smc['rvol']),data_asof=idx.get('asof'))
-                    signals.append(p)
+                    signals.append(cycle_wave.annotate(p,five,now))
                     # Never journal a hypothetical premium price as an observed signal.
             except (ValueError,BrokerUnavailable,KeyError):continue
         phase='PRELIMINARY 09:45' if (now.hour,now.minute)<(10,0) else 'FINAL 10:00'
@@ -687,7 +690,7 @@ class InsightsService:
                             fvg_up=smc['fvg_up'],fvg_down=smc['fvg_down'],rvol=smc['rvol']),
                    order_flow_proxy='FUTURES OI BUILDUP + CHAIN OI; NOT TRADE DELTA')
                 # No journal record: option entry premiums are not timestamp-verified.
-                signals.append(plan)
+                signals.append(cycle_wave.annotate(plan,five,now))
             except (BrokerUnavailable,ValueError,KeyError):unavailable+=1
         phase='PRELIMINARY 09:45' if (now.hour,now.minute)<(10,0) else 'FINAL 10:00'
         self._update('fo-stocks',dict(signals=signals,fib_setups=fib_setups,
