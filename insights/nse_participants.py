@@ -148,7 +148,8 @@ def direction(score,neutral=8):
 
 
 def _date(value):
-    if isinstance(value,date) and not isinstance(value,datetime):return value
+    if isinstance(value,datetime):return value.date()
+    if isinstance(value,date):return value
     return date.fromisoformat(str(value))
 
 
