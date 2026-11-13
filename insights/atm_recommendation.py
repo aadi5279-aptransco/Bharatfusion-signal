@@ -78,7 +78,7 @@ def evaluate(chain,expiry,underlying,now,calendar,bias="UNAVAILABLE",
     strike,legs=min(rows,key=lambda x:(abs(x[0]-spot),x[0]))
     base=dict(empty,atm_strike=strike,spot=round(spot,2),
               atm_distance_pct=round(100*abs(strike-spot)/spot,2),
-              quote_received_at=t.isoformat())
+              assessment_at=t.isoformat())
     inferred,source=_direction(bias,five,t)
     if requested_side in ("CE","PE"):
         # Explicit CE/PE search is allowed, but cannot masquerade as
