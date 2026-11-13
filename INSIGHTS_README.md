@@ -855,8 +855,8 @@ explicitly reads 'observation window', not a complete cycle.
 **Modified files:**
 - NEW `insights/nse_participants.py`
 - NEW `insights/participant_refresh.py`
-- NEW `insights/tests/test_nse_participants.py`
-- NEW `insights/tests/test_nse_participant_api.py`
+- NEW `insights/tests/test_nse_participants.py` (12 offline cases)
+- NEW `insights/tests/test_nse_participant_api.py` (2 route cases)
 - UPDATED `insights/service.py`
 - UPDATED `insights/api.py`
 - UPDATED `web/src/main.js`
@@ -887,3 +887,9 @@ Dashboard's **Refresh NSE reports** button.
 NSE network access is not guaranteed; production live ingestion and
 Windows test suites must be independently validated before trusting
 the displayed signal interpretations.
+
+**NSE access handling:** HTTP 403 or 429 immediately stops that
+batch, instead of trying additional dates. Such a response means
+the official archive has blocked or rate-limited automated access;
+the application does not bypass the restriction, fabricate data,
+or erase previously archived records.
