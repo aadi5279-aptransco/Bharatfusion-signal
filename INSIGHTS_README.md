@@ -917,3 +917,103 @@ Run `python -m unittest insights.tests.test_nse_participants -v`
 (2 tests), then both Python suites. No React rebuild or user database
 deletion is necessary. No broker credentials, signals or DB schema are
 modified by this patch.
+
+## Swing Opportunity Finder: an extra strategy in Swing Trades
+
+The existing strict `insights/strategies/swing.py` signals and the
+daily/weekly Gann/time-cycle/wave evidence remain untouched.
+
+A **NEW, separately ranked layer** is now appended to the Swing Trades
+snapshot (`GET /api/v1/market-insights/swing-trades`):
+- `opportunity_ready`: up to 20 completed daily swing strategies with
+  next-session *conditional* cash trigger, structural stop, T1 = 2R and
+  T2 = 3R (and no win-probability claim).
+- `opportunity_watch`: up to 20 developing near-breakout, EMA21
+  pullback or rising-trend watches, with explicit failed checks and no
+  invented trade levels.
+- `opportunity_count`: number of prospects from the *bounded* Dhan
+  stock universe; actual sample / instrument-master counts are shown.
+
+The scanner looks for price above rising EMA21/50/200 with confirmed
+weekly EMA10 alignment; prior-20-day closing breakout and relative
+daily volume >=1.2, or EMA21 pullback with bullish reclaim and
+moderate volume. It checks RSI14, daily cash turnover >=₹75 lakh and
+cash price >=₹50. The completed daily candle must be current before a
+READY state is possible; future and incomplete daily/weekly candles are
+excluded and stale data creates WATCH only. The next-session price
+trigger must be crossed (not assumed filled); stops must lie 0.3–9%
+below the trigger. Gann and confirmed wave evidence is supplementary
+only; it does not guarantee a trade.
+
+The finder **reuses the existing** `scan_longterm` loop's licensed
+Dhan daily histories after 15:40 IST. It does not add a second
+historical fetch for each stock or alter the original
+`INSIGHTS_LONGTERM_MAX_SYMBOLS` limit (default 80).
+Attributable FPI disclosed bulk/block BUY evidence, if available
+and matching a mapped ticker, is shown as a contextual annotation,
+not an eligibility condition or a claim about all FII trading.
+
+Updated/new files:
+- NEW `insights/strategies/swing_opportunities.py`
+- NEW `insights/tests/test_swing_opportunities.py` (7 offline tests)
+- UPDATED `insights/service.py`
+- UPDATED `web/src/main.js`
+- UPDATED `web/src/styles.css`
+
+### Extra FII Stock Deals tab and BTST closing strength bundled changes
+For the separate user-approved tasks:
+- NEW `insights/fii_stock_deals.py`
+- NEW `insights/tests/test_fii_stock_deals.py` (9 offline tests)
+- UPDATED `insights/service.py`, `insights/api.py`,
+  `web/src/main.js`, `web/src/styles.css`.
+- The FII tab shows separate BOUGHT and SOLD lists *only* for source-
+  verified FII/FPI clients in NSE bulk/block cash deal disclosures.
+  Public `fao_participant_oi` data does **not** identify stock-level FII
+  buys and sells. Missing/unknown identities are shown separately.
+- To attribute actual disclosed deals to FIIs, populate the locally
+  stored `verified_fpi_clients.json` with confirmed client names and
+  genuine official verification URLs, otherwise no names are
+  automatically guessed. Example schema:
+  `{"clients":[{"client_name":"EXACT EXCHANGE CLIENT NAME",
+  "category":"FPI","verification_source":"https://official-source"}]}`.
+  The example is a template, not a verified real FPI.
+- An optional importer reads downloaded NSE `bulk_YYYY-MM-DD.csv`
+  and `block_YYYY-MM-DD.csv` from the app's
+  `nse_disclosed_deals` data folder. Automated archive retrieval
+  is best-effort; the official NSE host may block it or its endpoint
+  may change. In either case the UI stays empty or uses verified local
+  reports; it does not claim that FIIs made no trades.
+- NEW `insights/strategies/btst_closing.py`
+- NEW `insights/tests/test_btst_closing.py` (7 offline tests)
+- UPDATED `insights/service.py`, `insights/api.py`,
+  `web/src/main.js`, `web/src/styles.css`.
+- BTST closing watch has separate 14:30 PRELIMINARY,
+  15:05 CONFIRMATION and 15:20 FINAL pre-close scans.
+  Its matched-time relative volume uses like-for-like *completed*
+  five-minute historical intervals; it does not compare a partial
+  15:05 session with whole-day volume. Delivery, OI, news and global
+  market evidence must be dated and/or labeled unavailable.
+
+### Combined Windows update / validation
+Stop `START_INSIGHTS.bat` and back up the project first.
+Copy changed files from the current development branch without
+overwriting .env, SQLite data, credentials or holiday calendar.
+Run from the project root:
+
+```bat
+.venv\\Scripts\\python.exe -m unittest insights.tests.test_swing_opportunities -v
+.venv\\Scripts\\python.exe -m unittest insights.tests.test_fii_stock_deals -v
+.venv\\Scripts\\python.exe -m unittest insights.tests.test_btst_closing -v
+.venv\\Scripts\\python.exe -m unittest discover -s tests -q
+.venv\\Scripts\\python.exe -m unittest discover -s insights\\tests -q
+cd web
+npm run build
+cd ..
+START_INSIGHTS.bat
+```
+
+Inspect `/api/v1/market-insights/swing-trades` for the new
+`opportunity_ready` and `opportunity_watch` arrays, and
+`/api/v1/market-insights/fii-stock-deals` for sourced FII transactions.
+All revisions require the Windows test/build and production-data
+verification; source commits alone do not establish a profitable edge.
