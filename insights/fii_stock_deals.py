@@ -258,11 +258,15 @@ class FIIStockDeals:
         now=(now or datetime.now(IST)).astimezone(IST)
         registry=_registry(self.root)
         rows=self.store.recent(15)
-        buys=[];sells=[];unclassified=0
+        buys=[];sells=[];unclassified=0;unknown_examples=[]
         for day,kind,symbol,client,side,qty,price,url in rows:
             identity=_identity(client,registry)
             if not identity["verified"]:
                 unclassified+=1
+                if len(unknown_examples)<30:
+                    unknown_examples.append(dict(trade_date=day,symbol=symbol,
+                        client=client,side=side,deal_type=kind,
+                        source_url=url,identity='NOT VERIFIED AS FII/FPI'))
                 continue
             obj=dict(trade_date=day,symbol=symbol,client=client,side=side,
                  quantity=qty,price=round(price,2),
@@ -276,6 +280,7 @@ class FIIStockDeals:
                 "NO VERIFIED FII CLIENT DEALS IN STORED DISCLOSURES"),
             bought=buys[:100],sold=sells[:100],
             unclassified_disclosed_rows=unclassified,
+            unclassified_examples=unknown_examples,
             verified_client_names=len(registry),
             report_dates=[dict(date=d,types=n) for d,n in reports],
             latest_report_date=reports[0][0] if reports else None,
