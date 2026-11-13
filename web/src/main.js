@@ -119,18 +119,55 @@ function AnalyseChooser({onSelect,busy}){
           (x.change_pct>0?'+':'')+x.change_pct.toFixed(2)+'%')))));
  return e('div',null,
   e('button',{type:'button',onClick:()=>setRefresh(v=>v+1)},'Refresh top movers'),
+  e('datalist',{id:'analyse-fno-symbol-options'},
+    ...(choices?.fno_symbols||[]).map((x,i)=>
+      e('option',{key:i,value:x.ticker||x.symbol,label:x.symbol},
+        x.symbol))),
   error?e(Notice,{warning:true},'Mover list unavailable: '+error):null,
   choices?e('div',null,
     e('p',{className:'small muted'},'Dhan quote coverage ',choices.coverage,'/',choices.universe,
        ' · ',choices.asof,' · ',choices.stale?'Market closed / stale snapshot':'Trading session'),
     e('div',{className:'analyse-selection-grid'},
       group('Mapped indices',choices.indices),
-      group('Top gainers',choices.gainers),
-      group('Top losers',choices.losers))):null);
+      group('Top 20 gainers',choices.gainers),
+      group('Top 20 losers',choices.losers))):null,
+  e('p',{className:'small muted'},
+    'Manual F&O stock: type the Dhan stock name or exchange ticker in the search box below. Start typing to see mapped symbols.'));
+}
+function AnalyseATM({data}){
+ const atm=data.atm_recommendation||{},contract=atm.contract;
+ const levels=atm.entry!=null&&atm.sl!=null&&atm.t1!=null&&atm.t2!=null;
+ return e(Section,{title:'ATM CE/PE option recommendation · research only'},
+  e('div',{className:'tile-grid'},
+    e(Tile,{title:'ATM STRIKE',value:atm.atm_strike==null?'—':price(atm.atm_strike),
+      sub:contract?.expiry?'Expiry '+contract.expiry:'Expiry '+(data.expiry||'not verified')}),
+    e(Tile,{title:'DIRECTION',value:atm.direction||'NO TRADE',
+      sub:atm.signal_source||'Awaiting completed price confirmation'}),
+    e(Tile,{title:'OPTION CONTRACT',value:contract?.symbol||'UNAVAILABLE',
+      sub:contract?.security_id?'Dhan ID '+contract.security_id:'No verified Dhan contract ID'}),
+    e(Tile,{title:'TRADE STATE',value:atm.status||'UNAVAILABLE',
+      sub:'Quote age not verified · No broker order'})),
+  e('p',{className:'small muted'},atm.reason||'No ATM assessment',
+      ' · Spot: ',price(atm.spot),' · ATM distance: ',
+      atm.atm_distance_pct==null?'—':atm.atm_distance_pct+'%'),
+  e('p',{className:'small muted'},'Dhan best bid ',price(atm.bid),' · Best ask ',
+      price(atm.ask),' · Spread ',atm.spread_pct==null?'—':atm.spread_pct+'%',
+      ' · Response sampled ',atm.quote_received_at||'—',
+      ' (response time does NOT verify exchange quote freshness)'),
+  levels?e('div',{className:'tile-grid'},
+    e(Tile,{title:'ILLUSTRATIVE BUY ENTRY',value:price(atm.entry),sub:'Best ask from chain, NOT executable'}),
+    e(Tile,{title:'ILLUSTRATIVE STOP',value:price(atm.sl),sub:'Option premium, not spot level'}),
+    e(Tile,{title:'TARGET 1 · 1.5R',value:price(atm.t1)}),
+    e(Tile,{title:'TARGET 2 · 2.5R',value:price(atm.t2)})):
+    e('p',{className:'small muted'},'No premium entry, stop or targets until direction, listed ATM leg, contract ID and bid/ask quality are checked.'),
+  e(Notice,{warning:true},atm.warning||'Research only: live contract quote timestamp and risk are not verified.'),
+  e('p',{className:'small muted'},
+    'Displayed ATM prices are hypothetical scenarios, not a trade instruction or calibrated success probability.'));
 }
 function AnalyseEvidence({data}){
  const a=data.analysis||{},mtf=a.mtf||{},plan=data.entry_plan;
  return e('div',null,
+  e(AnalyseATM,{data}),
   e('div',{className:'tile-grid'},
     e(Tile,{title:'DIRECTION',value:data.bias||'UNAVAILABLE'}),
     e(Tile,{title:'SETUP SCORE',value:a.score??'—',sub:'Heuristic, not probability'}),
@@ -160,9 +197,12 @@ function Analyse({data,onSearch,busy}){
  const [symbol,setSymbol]=useState('NIFTY');const [expiry,setExpiry]=useState('');
  const m=data.metrics;
  return e(React.Fragment,null,e(AnalyseChooser,{busy,onSelect:x=>{setSymbol(x);setExpiry('');onSearch(x,'')}}),e('form',{className:'searchbox',onSubmit:ev=>{ev.preventDefault();onSearch(symbol,expiry);}},
-   e('input',{value:symbol,onChange:ev=>setSymbol(ev.target.value.toUpperCase()),placeholder:'NIFTY, SENSEX, BANKNIFTY or stock symbol',maxLength:64,'aria-label':'Instrument symbol'}),
+   e('input',{value:symbol,onChange:ev=>setSymbol(ev.target.value.toUpperCase()),
+       list:'analyse-fno-symbol-options',
+       placeholder:'Enter any mapped F&O stock (e.g. HDFCLIFE) or index',
+       maxLength:64,'aria-label':'Instrument symbol'}),
    e('input',{value:expiry,onChange:ev=>setExpiry(ev.target.value),placeholder:'Expiry YYYY-MM-DD (optional)','aria-label':'Expiry date'}),
-   e('button',{type:'submit',disabled:busy},busy?'Analysing…':'Analyse option chain')),
+   e('button',{type:'submit',disabled:busy},busy?'Analysing…':'Analyse stock / ATM option')),
   data.error?e(Notice,{warning:true},data.error):null,
   data.symbol?e(AnalyseEvidence,{data}):null,
   data.symbol&&!m?e(Section,{title:'Cash or index price chart'},e(PriceChart,{candles:data.candles||[]})):null,
@@ -178,7 +218,7 @@ function Analyse({data,onSearch,busy}){
       e('p',{className:'small muted'},'OI changes and order-book quantities are positioning/liquidity proxies, not evidence of executed order flow.')),
     e(Section,{title:`Completed 5-minute price candles · ${data.symbol}`},e(PriceChart,{candles:data.candles||[]})),
     e('div',{className:'split'},e(Section,{title:`Option-chain OI · ${data.symbol} · ${data.expiry}`},e(OiChart,{strikes:m.strikes})),
-     e(Section,{title:'OI interpretation'},e('p',null,`Rule-based tilt: ${data.bias||'Undetermined'}`),e('p',{className:'muted'},data.note),e('p',null,`Call OI Δ: ${m.call_change?.toLocaleString('en-IN')} · Put OI Δ: ${m.put_change?.toLocaleString('en-IN')}`),e(Notice,{warning:true},m.iv_percentile_note),e(Signals,{items:data.plan?[data.plan]:[],empty:'No validated entry/target/stop plan for this option chain.'}))))
+     e(Section,{title:'Legacy OI-gated premium scenario'},e('p',null,`Rule-based tilt: ${data.bias||'Undetermined'}`),e('p',{className:'muted'},data.note),e('p',null,`Call OI Δ: ${m.call_change?.toLocaleString('en-IN')} · Put OI Δ: ${m.put_change?.toLocaleString('en-IN')}`),e(Notice,{warning:true},m.iv_percentile_note),e(Signals,{items:data.plan?[data.plan]:[],empty:'No validated entry/target/stop plan for this option chain.'}))))
    :data.symbol?e(Notice,null,'Optional option-chain unavailable. Underlying price research remains shown above.'):
      e(Notice,null,'Choose a mapped index or mover, or search a Dhan instrument. Quotes are retrieved only on request.'));
 }
