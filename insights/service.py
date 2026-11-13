@@ -13,7 +13,7 @@ from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
-from insights.strategies import swing,multibagger,momentum_query,fib_smc,fib_oi,opening_redbar,premarket
+from insights.strategies import swing,multibagger,momentum_query,fib_smc,fib_oi,opening_redbar,premarket,btst_closing
 from insights import ai_rank,cycle_wave,analyse_engine,swing_gann_wave
 
 DISCLAIMER='Rule-based research, not investment advice. Signals are not guaranteed; trading can cause significant losses. No orders are placed.'
@@ -52,6 +52,7 @@ class InsightsService:
           'intraday':{'signals':[],'buy_signals':[],'sell_signals':[],'status':'WAITING FOR 09:45 SHORTLIST'},
           'pre-market':{'gainers':[],'losers':[],'status':'WAITING FOR 08:00 PRIOR-SESSION SCAN'},
           'btst':{'signals':[],'status':'WAITING FOR 15:00 IST SCAN'},
+          'btst-closing':{'candidates':[],'confirmed':[], 'status':'WAITING FOR 14:30 IST PREVIEW'},
           'index-options':{'signals':[],'fib_setups':[],'opening_setups':[],'status':'WAITING FOR OPTION CHAIN'},
           'fo-stocks':{'signals':[],'fib_setups':[],'opening_setups':[],'status':'WAITING FOR FUTURES OI'},
           'swing-trades':{'signals':[],'status':'WAITING FOR COMPLETED DAILY SCAN'},
@@ -501,6 +502,141 @@ class InsightsService:
                   note='Top 10 are ranked across BUY and SELL using explainable evidence weights; not an AI win probability. All 11 momentum rules must pass first. Entry is a conditional 5m breakout/breakdown trigger; stop uses ATR and 3-bar structure, rejecting excessive risk. Running daily RSI and volume are provisional; no broker fills.')
         self._update('intraday',data,now)
         return data
+
+    def _btst_closing_oi(self,item,now):
+        """Optional F&O evidence, only for already promising candidates."""
+        future=item.get('future')
+        if not isinstance(future,dict) or not future.get('id'):
+            return dict(status='UNAVAILABLE — NO MAPPED FUTURES INSTRUMENT',
+                        classification='UNAVAILABLE')
+        try:
+            frame=self.broker.history(future,now,minutes=15,lookback_days=3,oi=True)
+            today=frame[(frame.index.date==now.date()) &
+                        (frame.index+pd.Timedelta(minutes=15)<=pd.Timestamp(now))]
+            if len(today)<2 or 'oi' not in today.columns:
+                return dict(status='UNAVAILABLE — COMPLETED SAME-DAY FUTURES OI INSUFFICIENT',
+                            classification='UNAVAILABLE')
+            recent=today.iloc[-1];previous=today.iloc[-2]
+            age=(pd.Timestamp(now)-today.index[-1]).total_seconds()/60
+            if age>45:return dict(status='UNAVAILABLE — STALE FUTURES OI',classification='UNAVAILABLE')
+            oi_change=float(recent.oi)-float(previous.oi)
+            price_change=float(recent.close)-float(previous.close)
+            if oi_change>0 and price_change>0:position='LONG BUILD-UP'
+            elif oi_change<0 and price_change>0:position='SHORT COVERING'
+            elif oi_change>0 and price_change<0:position='SHORT BUILD-UP'
+            elif oi_change<0 and price_change<0:position='LONG UNWINDING'
+            else:position='MIXED'
+            return dict(status='OBSERVED FUTURES OI, INTRADAY PROXY',
+                classification=position,oi_change=round(oi_change,2),
+                futures_price_change=round(price_change,2),
+                candle_asof=today.index[-1].isoformat(),
+                note='Two completed 15m futures bars only; not a verified full-day institution buildup')
+        except (BrokerUnavailable,KeyError,ValueError,TypeError,IndexError):
+            return dict(status='UNAVAILABLE — Dhan futures OI not verified',
+                        classification='UNAVAILABLE')
+
+    def scan_btst_closing(self,now):
+        """Independent 14:30 / 15:05 / 15:20 BTST; old BTST is untouched."""
+        now=now.astimezone(IST)
+        minutes=now.hour*60+now.minute
+        if minutes<14*60+30 or minutes>15*60+30:
+            return dict(status='OUTSIDE BTST PRE-CLOSE WINDOW',candidates=[],confirmed=[])
+        all_items={str(x['id']):x for x in self.instruments()
+                   if x.get('kind')=='stock' and x.get('id')}
+        selected=[];seen=set()
+        def add(item):
+            if not isinstance(item,dict):return
+            key=str(item.get('id'))
+            if key in all_items and key not in seen:
+                seen.add(key);selected.append(all_items[key])
+        # Quote selection is a single Dhan batch, not 200 historical scans.
+        if callable(getattr(self.broker,'market_quotes',None)):
+            try:
+                quote_items=list(all_items.values())
+                quotes=self.broker.market_quotes(quote_items[:500],now)
+                for item in sorted(quote_items,key=lambda x:
+                         quotes.get(str(x['id']),{}).get('change_pct',-999),reverse=True):
+                    if quotes.get(str(item['id']),{}).get('change_pct',0)>0:add(item)
+                    if len(selected)>=10:break
+            except (BrokerUnavailable,ValueError,KeyError,TypeError):pass
+        previous=self.snapshot('pre-market')
+        mapped={_norm(x['symbol']):x for x in all_items.values()}
+        for row in previous.get('gainers',[]):
+            if isinstance(row,dict):
+                item=mapped.get(_norm(row.get('symbol','')))
+                add(item)
+        if self._shortlist_date==now.date().isoformat():
+            for item in self._shortlist_up:add(item)
+        try:fallback=self._stock_list()
+        except (BrokerUnavailable,ValueError,TypeError):fallback=[]
+        for item in fallback:add(item)
+        try:limit=max(1,min(25,int(os.getenv('INSIGHTS_BTST_CLOSING_MAX_SYMBOLS','16'))))
+        except (ValueError,TypeError):limit=16
+        selected=selected[:limit]
+        nifty,sectors=self._context()
+        mapping=_sector_map()
+        nifty_ret=(nifty.get('session_change') if nifty and
+           nifty.get('session_date')==now.date().isoformat() and
+           recent_context(nifty,now) else None)
+        path=os.getenv('INSIGHTS_LICENSED_DELIVERY_FILE','')
+        try:delivery=json.loads(Path(path).read_text('utf-8')) if path else {}
+        except (OSError,ValueError,TypeError):delivery={}
+        delivery_current=delivery.get('date')==now.date().isoformat()
+        previous_current=delivery.get('previous_date') is not None and isinstance(delivery.get('previous_values'),dict)
+        values=(delivery.get('values') or {}) if delivery_current else {}
+        previous_values=(delivery.get('previous_values') or {}) if previous_current else {}
+        ranked=[];unavailable=0;missing_volume=0
+        for item in selected:
+            try:
+                five=self.broker.history(item,now,minutes=5,lookback_days=50)
+                # Last completed 5m bar must be from this session.
+                if not recent_frame(five,now,5,20):unavailable+=1;continue
+                daily=self.broker.daily(item,now,days=130)
+                key=item['symbol'];ticker=item.get('ticker','')
+                mapped_sector=mapping.get(_norm(key),mapping.get(_norm(ticker),''))
+                sector=sectors.get(mapped_sector)
+                sector_ret=(sector.get('session_change') if sector
+                    and sector.get('session_date')==now.date().isoformat()
+                    and recent_context(sector,now) else None)
+                result=btst_closing.evaluate(five,daily,now,key,
+                    nifty_change=nifty_ret,sector_change=sector_ret,
+                    delivery_pct=values.get(key,values.get(ticker)),
+                    previous_delivery_pct=previous_values.get(key,previous_values.get(ticker)),
+                    context=dict(gift_nifty='UNAVAILABLE — NO VERIFIED FEED',
+                      us_futures='UNAVAILABLE — NO VERIFIED FEED',
+                      earnings_and_news='UNAVAILABLE — NO TIMESTAMPED CATALYST FEED',
+                      sector_bias='OBSERVED' if sector_ret is not None else 'NOT VERIFIED',
+                      weekend_risk='FRIDAY / WEEKEND' if now.weekday()==4 else 'OVERNIGHT'))
+                if result['status']=='UNAVAILABLE':
+                    unavailable+=1;continue
+                if result['matched_volume']['count']<15:missing_volume+=1
+                result.update(instrument_id=item.get('id'),segment=item.get('segment'),
+                    instrument_type=item.get('instrument'))
+                ranked.append((result,item))
+            except (BrokerUnavailable,ValueError,KeyError,TypeError,IndexError):
+                unavailable+=1
+        ranked.sort(key=lambda pair:pair[0]['research_score'],reverse=True)
+        # Optional futures data for top research names only, not a
+        # mandatory gate and not the source of a claimed 'trade probability'.
+        for result,item in ranked[:5]:
+            result['futures_oi']=self._btst_closing_oi(item,now)
+        signals=[x for x,_ in ranked]
+        confirmed=[x for x in signals if x['status'].startswith('CONFIRMED')]
+        payload=dict(
+            status=('CONFIRMED PRE-CLOSE RESEARCH — NOT ORDERS' if confirmed else
+               'PRELIMINARY BTST WATCHLIST' if minutes<15*60+5 else
+               'BTST WATCH — NO FULLY QUALIFIED CLOSE-STRENGTH SETUPS'),
+            phase=('PRELIMINARY' if minutes<15*60+5 else
+                    'FINAL PRE-CLOSE' if minutes>=15*60+20 else 'CONFIRMATION'),
+            candidates=signals[:10],confirmed=confirmed[:5],
+            inspected=len(selected),assessed=len(signals),unavailable_count=unavailable,
+            missing_matched_volume=missing_volume,
+            data_asof=now.isoformat(),
+            note='Independent layer; previous strict BTST signals are unchanged. '
+                 '5m candles are pre-close observations, not official exchange close. '
+                 'Futures OI, delivery, sector, news and globals are optional and explicitly labelled.')
+        self._update('btst-closing',payload,now)
+        return payload
 
     def scan_btst(self,now):
         _,sectors=self._context();mapping=_sector_map();picks=[];skipped=0
@@ -1141,7 +1277,10 @@ class InsightsService:
                 ('index-options',(10,0),self.scan_index_options),
                 ('fo-stocks',(10,0),self.scan_fo),
                 ('intraday',(10,5),self.scan_intraday),
-                ('btst',(15,0),self.scan_btst)
+                ('btst-closing-preview',(14,30),self.scan_btst_closing),
+                ('btst',(15,0),self.scan_btst),
+                ('btst-closing-confirm',(15,5),self.scan_btst_closing),
+                ('btst-closing-final',(15,20),self.scan_btst_closing)
             ]
             for name,clock,job in jobs:
                 key=(date,name)
@@ -1149,7 +1288,13 @@ class InsightsService:
                     continue
                 # A late startup must not replay a fictitious 09:45 preview
                 # and then repeat the full scan at 10:00.
-                if name.endswith('-preview') and (now.hour,now.minute)>=(10,0):
+                if name=='btst-closing-preview' and (now.hour,now.minute)>=(15,5):
+                    self._done.add(key)
+                    continue
+                if name=='btst-closing-confirm' and (now.hour,now.minute)>=(15,20):
+                    self._done.add(key)
+                    continue
+                if name.endswith('-preview') and name!='btst-closing-preview' and (now.hour,now.minute)>=(10,0):
                     # Do not run a fictitious 09:45 preview at a late
                     # startup: the 10:00 final and option monitor take
                     # over at their scheduled completed-candle times.
