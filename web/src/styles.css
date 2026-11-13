@@ -57,3 +57,11 @@
 .mover-button .gain{color:var(--green)}
 .mover-button .loss{color:var(--red)}
 @media(max-width:880px){.analyse-selection-grid{grid-template-columns:1fr}}
+
+/* 8 AM prior-close candidate table and independent 5m options research */
+.research-table{font-variant-numeric:tabular-nums}
+.research-table .gain{color:var(--green)}
+.research-table .loss{color:var(--red)}
+.section select{max-width:100%;min-width:220px;border:1px solid var(--line);
+  border-radius:8px;background:var(--panel2);color:var(--ink);padding:9px 12px;
+  margin:6px 0 12px;cursor:pointer}
