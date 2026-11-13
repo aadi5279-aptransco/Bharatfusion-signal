@@ -31,6 +31,13 @@ def create_app(service=None):
             return jsonify(error='Unknown Market Insights module'),404
         return jsonify(service.snapshot(module))
 
+    @app.get('/api/v1/market-insights/analyse/choices')
+    def analyse_choices():
+        try:return jsonify(service.analyse_choices(datetime.now(IST)))
+        except (ValueError,RuntimeError):
+            return jsonify(status='UNAVAILABLE',indices=[],gainers=[],losers=[],
+                           note='Dhan quote ranking unavailable'),503
+
     @app.get('/api/v1/market-insights/analyse')
     def analyse():
         symbol=(request.args.get('symbol') or '').strip()
