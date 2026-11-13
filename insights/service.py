@@ -96,8 +96,30 @@ class InsightsService:
         return items
 
     def _lookup(self,name):
+        """Resolve mapped F&O symbols, display names and futures roots.
+
+        A Dhan cash instrument may be named e.g. 'BAJAJ FINANCE LIMITED'
+        while the user types its exchange F&O root 'BAJFINANCE'.
+        We only accept exact aliases grounded in the downloaded Dhan
+        master, not fuzzy guesses or unrelated stock names.
+        """
         target=_norm(name)
-        return next((x for x in self.instruments() if _norm(x['symbol'])==target or _norm(x.get('ticker',''))==target),None)
+        if not target:return None
+        items=self.instruments()
+        for item in items:
+            if target in (_norm(item.get('symbol','')),_norm(item.get('ticker',''))):
+                return item
+        matches=[]
+        for item in items:
+            if item.get('kind')!='stock':continue
+            future=item.get('future') or {}
+            display=str(future.get('symbol',''))
+            # Dhan futures generally carry an underlying root before
+            # the expiry delimiter. Only use a well-formed -FUT suffix.
+            if '-FUT' in display.upper():
+                root=display.split('-')[0]
+                if _norm(root)==target:matches.append(item)
+        return matches[0] if len(matches)==1 else None
 
     def _stock_list(self):
         all_items=[x for x in self.instruments() if x.get('kind')=='stock']
