@@ -8,6 +8,7 @@ import pandas as pd
 from insights.config import IST,ROOT,WATCHLIST,MAX_SYMBOLS,is_market_session
 from insights.db import Journal
 from insights.participant_refresh import ParticipantRefresh
+from insights.fii_stock_deals import FIIStockDeals
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
@@ -46,6 +47,7 @@ class InsightsService:
         self.broker=broker or DhanReadOnly();self.root=Path(root or ROOT)
         self.journal=Journal(self.root/'insights.sqlite')
         self.participant_manager=ParticipantRefresh(self.root,_holiday_set,self._participant_expiries)
+        self.fii_deals_manager=FIIStockDeals(self.root,_holiday_set)
         self._lock=threading.RLock();self._job_lock=threading.Lock()
         self._instruments=[];self._last_error='';self._timestamps={};self._snapshots={
           'dashboard':{'indices':[],'sectors':[],'status':'WAITING FOR DATA'},
@@ -89,6 +91,13 @@ class InsightsService:
         self._manual_requested_at=0.0
         self._manual_thread=None
         self._manual_refresh=dict(status='IDLE')
+
+    def fii_stock_deals(self,now=None):
+        """Stored, attributable NSE cash deal disclosures; read-only."""
+        return self.fii_deals_manager.snapshot(now or datetime.now(IST))
+
+    def request_fii_deals_refresh(self,now=None):
+        return self.fii_deals_manager.start(now or datetime.now(IST),force=True)
 
     def _participant_expiries(self):
         """Ask Dhan for genuine current/future NIFTY expiry dates.
@@ -1372,6 +1381,10 @@ class InsightsService:
                 # Official participant CSV download is independent from
                 # Dhan scans; it cannot delay an intraday order/scan loop.
                 try:self.participant_manager.start()
+                except Exception:pass
+                # Optional NSE bulk/block deal archive refresh is an
+                # independent worker; no intraday scanner lock/network.
+                try:self.fii_deals_manager.start()
                 except Exception:pass
                 try:self.run_due()
                 except Exception:
