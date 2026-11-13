@@ -552,3 +552,41 @@ and restart `START_INSIGHTS.bat`. Inspect
 `/api/v1/market-insights/analyse/choices` and a selected cash/index
 `/api/v1/market-insights/analyse?symbol=NIFTY`.
 The new changes require Windows test and live Dhan verification.
+
+## Swing Trades additional daily/weekly Gann + time-cycle + swing-wave layer
+
+Swing Trades, previously using the existing daily EMA/ADX/RSI/Supertrend/
+breakout logic, now attaches a separate **completed daily and weekly**
+evidence object to each *already qualified* swing candidate.
+
+- **Gann price:** square-root-of-price steps anchored to the latest
+  *confirmed daily pivot*; shows nearby mathematical support/resistance.
+- **Swing time windows:** 20, 30, 45, 60, 90, 120 completed trading
+  sessions from the last confirmed daily swing; 4, 8, 13, 21, 34
+  completed weekly bars from the last confirmed weekly swing.
+  This is not the intraday 09:15 clock cycle methodology.
+- **Wave structure:** separately classifies confirmed daily and
+  weekly higher highs/lows as RISING SWINGS, FALLING SWINGS,
+  MIXED/CORRECTIVE or UNDETERMINED. Elliott counts are explicitly
+  UNVERIFIED, not fabricated.
+- **Fail-closed weekly:** an unfinished calendar week is dropped;
+  the Friday week is considered complete only after 15:40 IST.
+  The current daily candle is likewise excluded until 15:40.
+- Original scan qualifiers, candidate ranking, entry, stop,
+  2R and 3R targets are **unchanged**. The layer cannot insert a
+  new trade, alter risk or claim an increased win probability.
+- The UI adds support, resistance, daily/weekly wave geometry
+  and near-cycle columns to the existing Swing Trades table.
+
+Files for existing Windows deployment:
+`insights/swing_gann_wave.py` (new),
+`insights/tests/test_swing_gann_wave.py` (new),
+`insights/service.py` (updated),
+`web/src/main.js` (updated).
+
+Stop and back up the application, copy those four paths, run
+`.venv\\Scripts\\python.exe -m unittest insights.tests.test_swing_gann_wave -v`,
+both full Python unit test suites, `cd web && npm run build`,
+restart `START_INSIGHTS.bat` and verify Swing Trades.
+The daily long-term scan remains scheduled only at 15:40 IST
+or later on an eligible exchange day.
