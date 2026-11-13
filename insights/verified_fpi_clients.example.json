@@ -1,0 +1,4 @@
+{
+  "clients": [],
+  "_instructions": "Copy to the app's BHARATSIGNAL_INSIGHTS_HOME folder as verified_fpi_clients.json, then add exact NSE-disclosed client names only after verifying the FPI/FII identity against an attributable official regulator/depository record. Each entry needs client_name, category FPI or FII, and a real https verification_source URL. Do not guess identity from a fund-like name. An empty list is intentional and does NOT imply FIIs made no trades."
+}
