@@ -31,6 +31,21 @@ def create_app(service=None):
             return jsonify(error='Unknown Market Insights module'),404
         return jsonify(service.snapshot(module))
 
+    @app.get('/api/v1/market-insights/participant-positioning')
+    def participant_positioning():
+        try:return jsonify(service.participant_positioning(datetime.now(IST)))
+        except (ValueError,RuntimeError,OSError):
+            return jsonify(status='UNAVAILABLE — NSE POSITION DATABASE',
+                           participants={},overall_direction='UNAVAILABLE'),503
+
+    @app.post('/api/v1/market-insights/participant-positioning/refresh')
+    def participant_refresh():
+        result=service.request_participant_refresh(datetime.now(IST))
+        code=(202 if result['status']=='STARTED' else
+              409 if result['status']=='REFRESH ALREADY RUNNING' else
+              429 if result['status']=='ALREADY CHECKED IN THIS WINDOW' else 503)
+        return jsonify(result),code
+
     @app.get('/api/v1/market-insights/analyse/choices')
     def analyse_choices():
         try:return jsonify(service.analyse_choices(datetime.now(IST)))
