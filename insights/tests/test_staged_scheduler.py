@@ -28,6 +28,11 @@ class SchedulingTests(unittest.TestCase):
                 self.assertEqual(service.discover_shortlist.call_count,0)
                 self.assertEqual(service.scan_index_options.call_count,1)
                 self.assertEqual(service.scan_fo.call_count,1)
+                # Calling a scheduler twice in the same 5-minute bucket
+                # cannot issue an additional option-chain/history scan.
+                self.assertEqual(service.run_due(at(9,40))['status'],'OK')
+                self.assertEqual(service.scan_index_options.call_count,1)
+                self.assertEqual(service.scan_fo.call_count,1)
                 self.assertEqual(service.run_due(at(9,45))['status'],'OK')
                 self.assertEqual(service.discover_shortlist.call_count,1)
                 self.assertEqual(service.scan_index_options.call_count,2)
