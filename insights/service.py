@@ -1056,12 +1056,21 @@ class InsightsService:
                 # today's fully completed daily candles. Any premarket
                 # failure is reported, but cannot retroactively erase the
                 # successful swing/multibagger scan.
-                try:
-                    prepared=self.scan_premarket(local)
-                    result['premarket_prepared']=prepared.get('assessed',0)
-                except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
-                    with self._lock:self._last_error='premarket-prep: '+str(exc)[:160]
+                if not (callable(getattr(self.broker,'instruments',None))
+                        and callable(getattr(self.broker,'daily',None))):
+                    # Some development/test brokers implement long-term
+                    # scanning only. Optional premarket preparation must
+                    # not invalidate an otherwise completed long-term job.
                     result['premarket_prepared']=0
+                    result['premarket_prep_status']='UNAVAILABLE — BROKER DAILY/INSTRUMENTS UNSUPPORTED'
+                else:
+                    try:
+                        prepared=self.scan_premarket(local)
+                        result['premarket_prepared']=prepared.get('assessed',0)
+                    except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
+                        with self._lock:self._last_error='premarket-prep: '+str(exc)[:160]
+                        result['premarket_prepared']=0
+                        result['premarket_prep_status']='UNAVAILABLE — DATA CHECK FAILED'
                 self._done.add(key)
                 return dict(status='DAILY LONGTERM COMPLETE',**result)
             except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
@@ -1093,7 +1102,11 @@ class InsightsService:
                     continue
                 # A late startup must not replay a fictitious 09:45 preview
                 # and then repeat the full scan at 10:00.
-                if name.endswith('-preview') and (now.hour,now.minute)>=(10,0):
+                if (name.endswith('-preview') and (now.hour,now.minute)>=(10,0)
+                    or name.endswith('-first5') and (now.hour,now.minute)>(9,30)):
+                    # Do not run a fictitious 09:30 opening scan at a
+                    # late startup. The normal 5-minute monitor handles
+                    # 09:35/09:40; 09:45 and 10:00 have dedicated scans.
                     self._done.add(key)
                     continue
                 try:
