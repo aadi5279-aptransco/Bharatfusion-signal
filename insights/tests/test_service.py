@@ -65,6 +65,9 @@ class ServiceTests(unittest.TestCase):
    self.assertEqual(r['metrics']['iv_percentile'],None)
    self.assertEqual(r['metrics']['pcr'],2)
    self.assertEqual(r['status'].split(' ')[0],'RESEARCH')
+   self.assertEqual(r['analysis']['status'].split(' ')[0],'UNAVAILABLE')
+   self.assertIsNone(r['entry_plan'])
+   self.assertIsNone(r['probability_of_win'])
  def test_recorded_stop_before_target_in_same_bar(self):
   with tempfile.TemporaryDirectory() as d:
    b=FakeBroker();s=InsightsService(b,d)
