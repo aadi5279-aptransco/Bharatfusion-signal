@@ -74,6 +74,108 @@ function OiChart({strikes=[]}){
  },[strikes]);
  return e('div',null,e('div',{className:'legend'},e('span',null,'● Call OI'),e('span',null,'● Put OI'),e('small',{className:'muted'},'X axis: mapped strike levels')),e('div',{ref,className:'chart'}));
 }
+function ParticipantRings({report}){
+ const rows=[['FII','FII','Outer'],['PRO','Pro','Middle'],['CLIENT','Retail / Client','Inner']];
+ const rings=[{r:120,key:'FII'},{r:88,key:'PRO'},{r:56,key:'CLIENT'}];
+ const members=report?.participants||{};
+ const tint=dir=>dir==='UP'?'var(--green)':dir==='DOWN'?'var(--red)':'var(--muted)';
+ const overall=report?.overall_direction||'UNAVAILABLE';
+ const display=(n,unit='')=>typeof n==='number'&&Number.isFinite(n)?
+   (n>0?'+':'')+n.toLocaleString('en-IN',{maximumFractionDigits:2})+unit:'—';
+ return e('div',{className:'participant-grid'},
+   e('div',{className:'participant-visual'},
+     e('svg',{viewBox:'0 0 320 320',role:'img',
+        'aria-label':'Nested participant positioning circles: FII outer, Pro middle, Retail inner',
+        className:'participant-rings'},
+       ...rings.flatMap(({r,key})=>[
+         e('circle',{key:key+'-bg',cx:160,cy:160,r,fill:'none',
+               stroke:'var(--line)',strokeWidth:22}),
+         e('circle',{key:key+'-signal',cx:160,cy:160,r,fill:'none',
+               stroke:tint(members[key]?.direction),strokeWidth:19})
+       ]),
+       e('text',{x:160,y:154,textAnchor:'middle',className:'participant-centre-caption'},'BIAS'),
+       e('text',{x:160,y:178,textAnchor:'middle',className:'participant-centre-value'},overall)
+     ),
+     e('p',{className:'small muted'},'Outside to inside: FII · Pro · Client (Retail)')),
+   e('div',{className:'participant-legend'},
+     ...rows.map(([key,name,ring])=>{
+       const item=members[key]||{};
+       return e('div',{key,className:'participant-legend-item'},
+          e('div',{className:'participant-legend-heading'},
+             e('span',{className:'participant-swatch',
+               style:{background:tint(item.direction)}}),
+             e('strong',null,name),
+             e('span',{className:'small muted'},ring+' circle'),
+             e('b',{style:{color:tint(item.direction)}},item.direction||'—')),
+          e('p',{className:'small muted'},'Position score: ',display(item.score),
+            ' · Day-to-day score Δ: ',display(item.daily_score_change)),
+          e('p',{className:'small muted'},'Index futures net: ',
+              display(item.index_futures_net),
+              ' · Δ from prior report: ',display(item.index_futures_net_change)),
+          e('p',{className:'small muted'},'Expiry-window futures net Δ: ',
+              display(item.cycle_futures_net_change),
+              ' · Volume participation: ',item.volume_alignment||'UNAVAILABLE')
+       );
+     }))
+ );
+}
+function ParticipantPositioning(){
+ const [report,setReport]=useState({status:'LOADING — NSE DAILY REPORTS',participants:{}});
+ const [loadError,setLoadError]=useState('');
+ const [refresh,setRefresh]=useState(false);
+ useEffect(()=>{
+   let live=true;
+   const load=()=>api('/api/v1/market-insights/participant-positioning')
+     .then(data=>{if(live){setReport(data);setLoadError('');}})
+     .catch(err=>{if(live)setLoadError('Participant archive unavailable: '+err.message);});
+   load();
+   const id=setInterval(load,12000);
+   return()=>{live=false;clearInterval(id);};
+ },[]);
+ const manuallyRefresh=async()=>{
+   setRefresh(true);setLoadError('');
+   try{
+      const res=await api('/api/v1/market-insights/participant-positioning/refresh',
+                          {method:'POST'});
+      if(res.status!=='STARTED')setLoadError(res.status||'NSE refresh not started');
+   }catch(err){setLoadError('NSE refresh: '+err.message);}
+   finally{setRefresh(false);}
+ };
+ const loaded=report.participants&&Object.keys(report.participants).length>0;
+ return e(Section,{title:'Participant positioning · NSE FII / Pro / Retail',
+   extra:e('button',{className:'refresh-btn',onClick:manuallyRefresh,disabled:refresh,
+        type:'button'},refresh?'Requesting…':'↻ Refresh NSE reports')},
+   e('p',{className:'small muted'},
+      'Source: NSE after-close participant futures/options OI and volume reports. ',
+      'These figures cover ALL index instruments and expiries, not individual expiry contracts.'),
+   e('div',{className:'tile-grid'},
+      e(Tile,{title:'POSITIONING BIAS',value:report.overall_direction||'UNAVAILABLE',
+         sub:'Weighted FII 50% · Pro 30% · Client 20% (heuristic)'}),
+      e(Tile,{title:'REPORT SESSION',value:report.trade_date||'NOT LOADED',sub:'Historical EOD, not live'}),
+      e(Tile,{title:'EXPIRY OBSERVATION WINDOW',
+         value:report.expiry_date||'UNVERIFIED',sub:report.cycle_label||'Not an expiry-specific breakdown'}),
+      e(Tile,{title:'PARTICIPATION ALIGNMENT',
+         value:report.all_aligned?'ALL THREE ALIGN':loaded?'MIXED':'UNAVAILABLE',
+         sub:'This is not a forecast or win rate'})),
+   loaded?e(ParticipantRings,{report}):
+      e('div',{className:'empty'},'No verified NSE OI + VOL day-pair stored yet. ',
+         'The scanner will retry after NSE publishes its end-of-day reports.'),
+   loadError?e(Notice,{warning:true},loadError):null,
+   e('p',{className:'small muted'},
+       'Sync: ',report.refresh?.status||report.status||'NOT AVAILABLE',
+       ' · Last attempt: ',report.refresh?.checked_at||'—',
+       ' · Stored trading days: ',report.history_days??0,
+       ' · Expiry window sessions observed: ',report.cycle_sessions??'—'),
+   report.refresh?.failed_dates?.length?
+      e('p',{className:'small muted'},'Some reports could not be retrieved: ',
+        report.refresh.failed_dates.slice(0,3).map(x=>x.day+' ('+x.reason+')').join('; ')):null,
+   e(Notice,{warning:true},
+      'Interpretation only: futures net and directional option-position proxies can reflect hedges, spreads and multi-leg strategies. ',
+      'Repeated daily OI levels are NOT summed; expiry-window changes compare stored snapshots. ',
+      'No guaranteed FII-led direction or trading signal.')
+ );
+}
+
 function Dashboard({data,onRefresh,refreshBusy,refreshState,refreshError}){
  const asof=data.data_asof?new Date(data.data_asof).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',dateStyle:'medium',timeStyle:'short'}):'Not available';
  const refreshed=data.updated_at?new Date(data.updated_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',dateStyle:'medium',timeStyle:'short'}):'Never';
@@ -92,6 +194,7 @@ function Dashboard({data,onRefresh,refreshBusy,refreshState,refreshError}){
   refreshState?.status==='NO_DATA'||refreshState?.status==='FAILED'?e(Notice,{warning:true},refreshState.message||'Market data unavailable.'):null,
   data.not_live&&data.data_asof?e(Notice,{warning:true},'HISTORICAL SNAPSHOT — NOT LIVE. Bias and changes refer to the completed session dated '+lastSession+'. Do not use these as live entry signals.'):null,
   e('div',{className:'tile-grid'},e(Tile,{title:'NIFTY 50 BIAS',value:nifty?.bias||'Awaiting data',sub:nifty?.score!=null?`Rule score: ${nifty.score}`:'EMA / VWAP / ADX / structure'}),e(Tile,{title:'SENSEX BIAS',value:sensex?.bias||'Awaiting data',sub:sensex?.score!=null?`Rule score: ${sensex.score}`:'Missing inputs are not guessed'}),e(Tile,{title:'SECTORS AVAILABLE',value:sectors.length,sub:'Dhan sector indices'}),e(Tile,{title:'MARKET DATA',value:data.status||'No connection',sub:data.updated_at||'Not updated'})),
+  e(ParticipantPositioning),
   e('div',{className:'split'},
    e(Section,{title:'Index bias & underlying rules'},indices.length?indices.map((x,i)=>e('div',{className:'bias',key:i},
     e('div',{className:'bias-head'},e('b',null,x.symbol),e(Badge,{type:x.bias==='Uptrend'?'positive':x.bias==='Downtrend'?'negative':''},x.bias),e(Text,{muted:true},`Score ${x.score??'N/A'}`)),
