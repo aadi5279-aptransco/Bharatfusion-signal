@@ -10,6 +10,7 @@ Entries are CONDITIONAL next-session triggers, not fills.
 """
 from __future__ import annotations
 import math
+from datetime import datetime
 import pandas as pd
 from insights.config import IST
 from insights.strategies.swing import _atr,_rsi
@@ -35,9 +36,23 @@ def evaluate(frame,symbol,asof):
     t=t.tz_convert(IST)
     if not isinstance(frame,pd.DataFrame) or not {"open","high","low","close","volume"}.issubset(frame.columns):
         return _result(symbol,"UNAVAILABLE","Daily OHLCV unavailable")
-    if not isinstance(frame.index,pd.DatetimeIndex) or frame.index.tz is None or frame.index.has_duplicates:
+    index=frame.index
+    # pandas may use an object index when aware timestamps have mixed
+    # timezone representations. Accept those without guessing naive dates.
+    if not isinstance(index,pd.DatetimeIndex):
+        if not all(isinstance(x,datetime) and x.tzinfo is not None
+                   and x.utcoffset() is not None for x in index):
+            return _result(symbol,"UNAVAILABLE","Duplicate or timezone-naive daily timestamps")
+        try:index=pd.to_datetime(index,utc=True)
+        except (TypeError,ValueError):
+            return _result(symbol,"UNAVAILABLE","Invalid daily timestamps")
+    if index.tz is None or index.has_duplicates or index.hasnans:
         return _result(symbol,"UNAVAILABLE","Duplicate or timezone-naive daily timestamps")
-    daily=frame.sort_index().copy()
+    # Concatenating differently named timezones can normalize an index to
+    # UTC. Session dates and weekly buckets must always use exchange time.
+    daily=frame.copy()
+    daily.index=index.tz_convert(IST)
+    daily=daily.sort_index()
     day_complete=(t.hour,t.minute)>=(15,40)
     daily=daily[(daily.index.date<t.date())|
                 ((daily.index.date==t.date())&day_complete)]
@@ -153,3 +168,4 @@ def evaluate(frame,symbol,asof):
             result.update(readiness="WATCH",status="WATCH — STOP DISTANCE UNSUITABLE",
                           blockers=["Stop distance outside 0.3–9% guard"])
     return result
+
