@@ -82,3 +82,13 @@
 .participant-swatch{width:11px;height:11px;border-radius:99px;flex:0 0 11px;
   border:1px solid var(--line)}
 @media(max-width:850px){.participant-grid{grid-template-columns:1fr}}
+
+/* FII/FPI exchange-disclosed transactions (not total investor cash flow) */
+.fii-deals-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.fii-deals-columns .section{min-width:0}
+.fii-deals-columns .tablewrap{max-height:480px;overflow:auto}
+.fii-deals-columns table{min-width:680px}
+.fii-unknown-list{max-height:270px;overflow:auto;border:1px solid var(--line);
+  border-radius:10px;padding:8px 12px}
+.fii-unknown-list p{margin:5px 0;font-variant-numeric:tabular-nums}
+@media(max-width:1080px){.fii-deals-columns{grid-template-columns:1fr}}
