@@ -4,8 +4,8 @@ import {createChart, CandlestickSeries, HistogramSeries} from 'lightweight-chart
 import './styles.css';
 const e=React.createElement;
 const RISK='Rule-based analytics, not investment advice. Entries and targets are not guaranteed. Trading carries risk of loss. No orders are placed.';
-const tabs=[['Dashboard','▦'],['Analyse','⌕'],['Pre-Market 8 AM','☼'],['Intraday','↗'],['BTST','◷'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
-const route={'Dashboard':'dashboard','Analyse':'analyse','Pre-Market 8 AM':'pre-market','Intraday':'intraday','BTST':'btst','Index Options':'index-options','F&O Stocks':'fo-stocks','Swing Trades':'swing-trades','Multibagger':'multibagger','Track Record':'track-record'};
+const tabs=[['Dashboard','▦'],['Analyse','⌕'],['Pre-Market 8 AM','☼'],['Intraday','↗'],['BTST','◷'],['FII Stock Deals','⇄'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
+const route={'Dashboard':'dashboard','Analyse':'analyse','Pre-Market 8 AM':'pre-market','Intraday':'intraday','BTST':'btst','FII Stock Deals':'fii-stock-deals','Index Options':'index-options','F&O Stocks':'fo-stocks','Swing Trades':'swing-trades','Multibagger':'multibagger','Track Record':'track-record'};
 async function api(url,options={}){const res=await fetch(url,{...options,headers:{Accept:'application/json',...(options.headers||{})},cache:'no-store'});const body=await res.json();if(!res.ok)throw Error(body.error||`HTTP ${res.status}`);return body;}
 function Text({children,muted=false}){return e('span',{className:muted?'muted':''},children);}
 function Badge({children,type=''}){return e('span',{className:`badge ${type}`},children);}
@@ -397,6 +397,71 @@ function BTSTClosingStrength(){
      rows.length?e('div',{className:'btst-close-list'},...rows):
        e('div',{className:'empty'},'Awaiting 14:30 scan or verified cash candles.')));
 }
+function FIIStockDealsPanel(){
+ const [data,setData]=useState({bought:[],sold:[],status:'WAITING FOR VERIFIED NSE DISCLOSURES'});
+ const [error,setError]=useState('');
+ const [requesting,setRequesting]=useState(false);
+ useEffect(()=>{
+   let alive=true;
+   const load=()=>api('/api/v1/market-insights/fii-stock-deals')
+     .then(value=>{if(alive){setData(value);setError('');}})
+     .catch(err=>{if(alive)setError(err.message)});
+   load();const id=setInterval(load,20000);
+   return()=>{alive=false;clearInterval(id);};
+ },[]);
+ const refresh=async()=>{
+   setRequesting(true);setError('');
+   try{
+     const result=await api('/api/v1/market-insights/fii-stock-deals/refresh',{method:'POST'});
+     if(result.status!=='STARTED')setError(result.status||'Refresh unavailable');
+   }catch(err){setError(err.message);}
+   finally{setRequesting(false);}
+ };
+ const group=(heading,items,kind)=>
+   e(Section,{title:heading},
+     items.length?e('div',{className:'tablewrap'},
+       e('table',{className:'research-table'},
+          e('thead',null,e('tr',null,
+            ...['Report date','Stock','Client','Shares','Reported price','Approx ₹ Cr','Type','Evidence']
+             .map(x=>e('th',{key:x},x)))),
+          e('tbody',null,...items.map((x,i)=>e('tr',{key:i},
+            e('td',null,x.trade_date),
+            e('td',null,e('strong',null,x.symbol)),
+            e('td',null,x.client),
+            e('td',null,(x.quantity||0).toLocaleString('en-IN')),
+            e('td',null,price(x.price)),
+            e('td',null,x.approx_value_crore??'—'),
+            e('td',null,x.deal_type),
+            e('td',null,
+              e('a',{href:x.source_url,target:'_blank',rel:'noopener noreferrer'},'NSE report'),
+              ' · ',
+              e('a',{href:x.verification_source,target:'_blank',rel:'noopener noreferrer'},'FPI identity'))))))):
+       e('p',{className:'empty'},'No attributable FII/FPI '+kind+' disclosure found in stored reports. This does NOT mean FIIs made no '+kind.toLowerCase()+' trades.'));
+ return e('div',null,
+   e(Section,{title:'NSE disclosed foreign institutional stock transactions'},
+     e('p',{className:'small muted'},'Only verified FII/FPI-name bulk and block deal disclosures; NOT all daily foreign institutional stock buying or selling. Aggregate FII index derivatives OI cannot identify individual stocks.'),
+     e('div',{className:'tile-grid'},
+       e(Tile,{title:'VERIFIED FII BOUGHT',value:(data.bought||[]).length}),
+       e(Tile,{title:'VERIFIED FII SOLD',value:(data.sold||[]).length}),
+       e(Tile,{title:'LATEST REPORT',value:data.latest_report_date||'NOT AVAILABLE'}),
+       e(Tile,{title:'UNVERIFIED CLIENT DEALS',value:data.unclassified_disclosed_rows??0,
+          sub:'Not counted as FII'})),
+     e('button',{type:'button',disabled:requesting,onClick:refresh},requesting?'Requesting…':'Refresh official NSE disclosures'),
+     e('p',{className:'small muted'},'Source: NSE public bulk/block disclosures · Identity registry matches: ',data.verified_client_names??0,
+        ' · Refresh: ',data.refresh?.status||'NOT STARTED'),
+     error?e(Notice,{warning:true},error):null,
+     e(Notice,{warning:true},'FII labels require documented identity confirmation. Unknown clients remain unclassified. Results are historical disclosures only, not complete institutional flow or trade recommendations.')),
+   e('div',{className:'fii-deals-columns'},
+      group('FII / FPI bought stocks',data.bought||[],'BUY'),
+      group('FII / FPI sold stocks',data.sold||[],'SELL')),
+   (data.unclassified_examples||[]).length?e(Section,{title:'Other disclosed transactions — FII identity NOT verified'},
+     e('details',null,e('summary',null,'View up to 30 unclassified deals (not FII lists)'),
+       e('div',{className:'fii-unknown-list'},
+         ...(data.unclassified_examples||[]).map((x,i)=>
+           e('p',{className:'small',key:i},x.trade_date,' · ',x.symbol,
+             ' · ',x.client,' · ',x.side,' · ',x.deal_type))))):null,
+   e('p',{className:'small muted'},data.note||'A registered FPI client identity must have an exact sourced match; configure verified_fpi_clients.json in the application data directory.'));
+}
 function ReadinessPanel(){
  const [state,setState]=useState(null);const [loading,setLoading]=useState(true);
  useEffect(()=>{let live=true;api('/api/v1/market-insights/readiness')
@@ -694,6 +759,7 @@ function App(){
     active==='Dashboard'?e(Dashboard,{data,onRefresh,refreshBusy,refreshState:health.manual_refresh,refreshError}):null,
     active==='Analyse'?e(Analyse,{data,onSearch,busy}):null,
     active==='Pre-Market 8 AM'?e(PremarketWatch,{data}):null,
+    active==='FII Stock Deals'?e(FIIStockDealsPanel):null,
     active==='Swing Trades'?e(SwingTrades,{data}):null,
     active==='Multibagger'?e(MultibaggerResearch,{data}):null,
     ['Intraday','BTST','Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
