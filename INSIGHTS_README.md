@@ -590,3 +590,112 @@ both full Python unit test suites, `cd web && npm run build`,
 restart `START_INSIGHTS.bat` and verify Swing Trades.
 The daily long-term scan remains scheduled only at 15:40 IST
 or later on an eligible exchange day.
+
+## New pre-market 08:00 stock watchlist and independent opening Fib option watches
+
+### Pre-Market 8 AM tab
+- Uses the **previous fully completed Dhan daily candles only**;
+  it does not claim access to 8:00 AM cash/index prices when the
+  exchange has not opened.
+- The source is the mapped **F&O stock universe**, limited by
+  `INSIGHTS_PREMARKET_MAX_SYMBOLS` (default 220, capped at 250).
+  Coverage and unavailable/short history counts are displayed.
+  It does **not** claim whole-NSE/BSE coverage.
+- Displays the strongest 10 previous-day gainers and 10 losers (if
+  eligible data exists), a separate 20-session **close** breakout/breakdown
+  flag, prior-session relative volume, EMA20/EMA50 direction and an
+  explanatory *heuristic watch score* (not win probability).
+- On a configured market morning, scheduler builds/uses this watchlist
+  starting **08:00 IST**. If the app stayed running after the previous
+  close, the 15:40+ long-term scan also prepares an atomic local
+  `premarket_watch.json` cache from that completed session, so it can
+  be loaded immediately after next startup. The cache is accepted at
+  8 AM **only** if its session date matches the last eligible trading
+  day from the configured exchange calendar. If the app was off or
+  Dhan access failed, the tab may show unavailable rather than
+  fabricate candidates; the app cannot execute with the computer off.
+- Previous-day gainers/losers are watchlist candidates, **NOT** guaranteed
+  next-session BUY/SELL calls. Actual first candle and redbar
+  direction requires fresh completed same-session 5m candles.
+- Legacy 09:45/10:00 shortlist and all 11 strict daily/15m signal rules
+  remain independently available and unchanged.
+
+### Index Options and F&O Stocks — new directional watches
+Both tabs now independently show **two additional** 5m price-structure
+watches separate from legacy strict SMC/Futures-OI signals and the old
+09:45/12:45 Fib studies.
+
+**First 5-minute opening candle**: use spot index/cash 09:15–09:20
+bar. Low = Fibonacci 0; high = 1. Two subsequent *completed* 5m
+closes above 1 produce a **CE spot-direction watch**; two closes
+below 0 produce a **PE spot-direction watch**. The first possible
+confirmation is ~09:30 IST. One wick cannot qualify.
+
+**First red bar**: explicitly ignore the 09:15 opening candle and find
+the first subsequent 5-minute candle with `close < open`. Set Fib
+**0 = that red bar HIGH and 1 = LOW** (descending orientation).
+0.44 is then the **upper** price line, 0.56 the **lower** line.
+Two completed 5m closes above 0.44 create a CE direction watch;
+two below 0.56 a PE direction watch. The 0.44–0.56 price band
+is NO TRADE. Before a red candle or two confirmation bars exist,
+the UI says WAITING; if there is no sustained break it says
+NO_TRADE. Both trigger prices and the selected reference candle
+appear on a 5m underlying spot/cash chart.
+
+For watches passing the 2-close rule, illustrative **underlying**
+stop is the reference opposite extreme; 1.5R and 2.5R
+targets are displayed only when the stop direction is valid and
+within a 6% safety guard. These are NOT option premium levels or fills.
+Only then does the app optionally look up the nearest Dhan
+ATM option contract and prior/current OI evidence, with expiry,
+strike, security ID and **unverified quote age** explicitly labelled.
+OI missing/contradictory must not suppress the observed spot watch,
+but no premium-level trade can be called validated without a
+fresh contract quote, transaction costs and market backtesting.
+
+The Index Options scans operate independently from dashboard bias.
+The F&O Stock option direction scanner now checks a bounded
+**balanced** sample of morning premarket movers, the 10:00 shortlist
+and configured F&O underlyings even if strict legacy signals are
+empty; it does not re-scan all equities every five minutes.
+Actual order execution remains permanently disabled.
+
+### Installation for an existing Windows app
+Stop and back up the program; copy these files from the development
+branch preserving the indicated project paths:
+
+- NEW `insights/strategies/opening_redbar.py`
+- NEW `insights/strategies/premarket.py`
+- NEW `insights/tests/test_opening_redbar.py`
+- NEW `insights/tests/test_premarket_8am.py`
+- UPDATED `insights/tests/test_staged_scheduler.py`
+- UPDATED `insights/service.py`
+- UPDATED `insights/api.py`
+- UPDATED `web/src/main.js`
+- UPDATED `web/src/styles.css`
+
+Never overwrite `.env`, Dhan credentials, calendar files,
+SQLite journals or other local databases. Commands:
+
+```bat
+cd /d "H:\\BharatSignal_Fusion_Ready\\BharatSignal_Fusion_Insights"
+.venv\\Scripts\\python.exe -m unittest insights.tests.test_opening_redbar -v
+.venv\\Scripts\\python.exe -m unittest insights.tests.test_premarket_8am -v
+.venv\\Scripts\\python.exe -m unittest discover -s tests -q
+.venv\\Scripts\\python.exe -m unittest discover -s insights\\tests -q
+cd web
+npm run build
+cd ..
+START_INSIGHTS.bat
+```
+
+Check local endpoints:
+- `GET /api/v1/market-insights/pre-market`
+- `GET /api/v1/market-insights/index-options`:
+  `opening_setups`, `opening_ready`
+- `GET /api/v1/market-insights/fo-stocks`: same two fields.
+
+Check `previous_session`, coverage counts and each candidate's
+`state`. Do not interpret historical watchlists as current
+trades. Source changes must still pass the Windows tests/build and
+live Dhan validation; do not assume predictive accuracy.
