@@ -14,7 +14,7 @@ from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
-from insights.strategies import swing,multibagger,momentum_query,fib_smc,fib_oi,opening_redbar,premarket,btst_closing
+from insights.strategies import swing,multibagger,momentum_query,fib_smc,fib_oi,opening_redbar,premarket,btst_closing,swing_opportunities
 from insights import ai_rank,cycle_wave,analyse_engine,swing_gann_wave
 
 DISCLAIMER='Rule-based research, not investment advice. Signals are not guaranteed; trading can cause significant losses. No orders are placed.'
@@ -1141,7 +1141,16 @@ class InsightsService:
                 age=(now.date()-datetime.strptime(rank_date,'%Y-%m-%d').date()).days
                 if age<0 or age>45:rank_rows={}
             except (ValueError,TypeError):rank_rows={}
-        swing_rows=[];multi_rows=[]
+        swing_rows=[];multi_rows=[];opportunity_rows=[]
+        # Attributable disclosed NSE deals are optional *context* only:
+        # no full-market FII flows are inferred from bulk/block trades.
+        try:
+            disclosed=self.fii_deals_manager.snapshot(now)
+            verified_fpi_buys={_norm(x['symbol']) for x in disclosed.get('bought',[])
+               if isinstance(x,dict) and
+               0<=(now.date()-datetime.strptime(x['trade_date'],'%Y-%m-%d').date()).days<=20}
+        except (OSError,ValueError,KeyError,TypeError):
+            verified_fpi_buys=set()
         failures=0;insufficient=0
         for item in universe:
             try:
@@ -1154,13 +1163,26 @@ class InsightsService:
                 # Independent daily/weekly evidence; do not change existing
                 # daily swing signal eligibility, entry, stop or 2R/3R.
                 swing_matches=swing.scan(daily,item['symbol'],now)
-                if swing_matches:
+                opportunity=swing_opportunities.evaluate(daily,item['symbol'],now)
+                include_opportunity=(opportunity['status']!='UNAVAILABLE' and
+                    opportunity['setup']!='NO BULLISH SETUP')
+                if swing_matches or include_opportunity:
                     gann_layer=swing_gann_wave.assess(daily,now)
                     for candidate in swing_matches:
                         enriched=dict(candidate)
                         enriched['swing_gann_wave']=gann_layer
                         enriched['gann_wave_alignment']=gann_layer['alignment']
                         swing_rows.append(enriched)
+                    if include_opportunity:
+                        opportunity['swing_gann_wave']=gann_layer
+                        opportunity['gann_wave_alignment']=gann_layer.get('alignment','UNAVAILABLE')
+                        opportunity['verified_fpi_disclosed_buy_recent']=(
+                            _norm(item['symbol']) in verified_fpi_buys)
+                        opportunity['fii_evidence_scope']=(
+                            'EXACT VERIFIED NSE BULK/BLOCK BUY ONLY — NOT TOTAL FII FLOW'
+                            if opportunity['verified_fpi_disclosed_buy_recent'] else
+                            'NO VERIFIED RECENT FPI BULK/BLOCK BUY EVIDENCE')
+                        opportunity_rows.append(opportunity)
                 rank=rank_rows.get(item['symbol']) if isinstance(rank_rows,dict) else None
                 result=multibagger.evaluate(
                     daily,item['symbol'],daily.index[-1].date().isoformat(),
@@ -1168,6 +1190,11 @@ class InsightsService:
                 if result is not None:multi_rows.append(result)
             except (BrokerUnavailable,ValueError,KeyError,TypeError,IndexError):
                 failures+=1
+        opportunity_rows.sort(key=lambda x:(
+            0 if x.get('readiness')=='READY' else 1,
+            -(x.get('score') or 0),x['symbol']))
+        ready_opps=[x for x in opportunity_rows if x.get('readiness')=='READY'][:20]
+        watch_opps=[x for x in opportunity_rows if x.get('readiness')!='READY'][:20]
         swing_rows.sort(key=lambda row:(
             -row['risk_reward'],-row['trend_strength'],
             -(row['volume_ratio'] if row['volume_ratio'] is not None else 0),
@@ -1180,6 +1207,10 @@ class InsightsService:
                   note='Completed daily candles only; no live orders or fill assumptions.')
         self._update('swing-trades',dict(
             signals=swing_rows[:100],
+            opportunity_ready=ready_opps,
+            opportunity_watch=watch_opps,
+            opportunity_count=len(opportunity_rows),
+            opportunity_version=swing_opportunities.VERSION,
             status='DAILY SWING RESEARCH COMPLETE',
             **meta),now)
         self._update('multibagger',dict(
@@ -1190,7 +1221,9 @@ class InsightsService:
             rs_rank_source='LOCAL DATED REFERENCE' if rank_rows else 'UNVERIFIED',
             available_eligibility=sum(row['eligible'] for row in multi_rows),
             **meta),now)
-        return dict(swing_count=len(swing_rows),multibagger_count=len(multi_rows),
+        return dict(swing_count=len(swing_rows),swing_opportunity_ready=len(ready_opps),
+                    swing_opportunity_watch=len(watch_opps),
+                    multibagger_count=len(multi_rows),
                     unavailable_count=failures,insufficient_history=insufficient)
 
     def run_due(self,now=None):
