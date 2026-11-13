@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime
 from insights.config import IST, is_market_session
 from insights.brokers.dhan import BrokerUnavailable
-from insights import analyse_engine
+from insights import analyse_engine,atm_recommendation
 from insights.strategies import options
 
 
@@ -29,10 +29,14 @@ def choices(service, now, calendar):
     return dict(status='QUOTE MOVERS — NOT TRADE SIGNALS' if rows
                 else 'MOVERS UNAVAILABLE; INDEX LIST STILL ACCESSIBLE',
         gainers=sorted((x for x in rows if x['change_pct']>0),
-                       key=lambda x:-x['change_pct'])[:15],
+                       key=lambda x:-x['change_pct'])[:20],
         losers=sorted((x for x in rows if x['change_pct']<0),
-                      key=lambda x:x['change_pct'])[:15],
-        indices=indices,coverage=len(rows),universe=len(stocks),
+                      key=lambda x:x['change_pct'])[:20],
+        indices=indices,
+        fno_symbols=[dict(symbol=x['symbol'],ticker=x.get('ticker',''),
+                          instrument_id=str(x.get('id','')))
+                     for x in sorted(stocks,key=lambda v:v['symbol'])],
+        coverage=len(rows),universe=len(stocks),
         asof=now.isoformat(),stale=not is_market_session(now,calendar),
         note='Only Dhan-mapped instruments. Previous-close percentage change when supplied; otherwise a labelled session-open change. Not a complete NSE/BSE ranking.')
 
@@ -72,8 +76,15 @@ def analyse(service,symbol,now,expiry,calendar,normalize):
         selected=expiry or (expiries[0] if expiries else None)
         if selected:
             chain=service.broker.option_chain(item,selected)
-            metrics=options.chain_metrics(chain)
-            chain_status='AVAILABLE — CONTRACT QUOTE AGE NOT VERIFIED'
+            # An OI/PCR computation may be unavailable while the Dhan
+            # contract/strike map and two-sided quotes still exist. Keep
+            # that contract map for the independent ATM research layer.
+            try:
+                metrics=options.chain_metrics(chain)
+                chain_status='AVAILABLE — CONTRACT QUOTE AGE NOT VERIFIED'
+            except ValueError:
+                metrics=None
+                chain_status='CONTRACT MAP AVAILABLE — OI/PCR INCOMPLETE'
         else:chain_status='NO FUTURE EXPIRY'
     except ValueError as exc:
         if expiry or requested_side:raise
@@ -83,7 +94,9 @@ def analyse(service,symbol,now,expiry,calendar,normalize):
     evidence=analyse_engine.evaluate(frames.get(5),frames.get(15),frames.get(60),
                    now,depth=depth,option_metrics=metrics)
     bias=evidence['bias']
-    if chain and (bias in ('BULLISH','BEARISH') or requested_side):
+    atm=atm_recommendation.evaluate(chain,selected,item['symbol'],now,calendar,
+          bias=bias,five=frames.get(5),requested_side=requested_side)
+    if chain and metrics is not None and (bias in ('BULLISH','BEARISH') or requested_side):
         direction=('Uptrend' if bias=='BULLISH' else
                    'Downtrend' if bias=='BEARISH' else 'Sideways')
         try:
@@ -93,6 +106,7 @@ def analyse(service,symbol,now,expiry,calendar,normalize):
     five=frames.get(5)
     return dict(symbol=item['symbol'],asset_type=item.get('kind'),
        expiry=selected,expiries=expiries[:15],metrics=metrics,plan=plan,
+       atm_recommendation=atm,
        spot=chain.get('last_price') if chain else (
            float(five.close.iloc[-1]) if five is not None else None),
        candles=candles,
@@ -110,4 +124,5 @@ def analyse(service,symbol,now,expiry,calendar,normalize):
                if metrics is not None and evidence['status'].startswith('UNAVAILABLE')
                else evidence['status']),
        history_errors=history_errors,
-       note=note)
+       note=note,
+       recommendation_status=atm['status'])
