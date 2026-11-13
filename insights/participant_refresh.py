@@ -128,9 +128,9 @@ class ParticipantRefresh:
             if calendar is None:return dict(status="BLOCKED — CALENDAR UNAVAILABLE")
             if not self._trading(now.date(),calendar):return dict(status="NOT A TRADING DAY")
             clock=(now.hour,now.minute)
-            slot=("morning" if (8,0)<=clock<(9,0) else
-                  "evening1" if (18,0)<=clock<(18,30) else
-                  "evening2" if (19,30)<=clock<(20,0) else None)
+            slot=("morning" if (8,0)<=clock<(9,15) else
+                  "evening1" if (18,0)<=clock<(19,30) else
+                  "evening2" if (19,30)<=clock<=(23,59) else None)
             if not slot:return dict(status="NOT SCHEDULED")
             key=(now.date().isoformat(),slot)
         else:key=(now.date().isoformat(),"manual",now.hour)
