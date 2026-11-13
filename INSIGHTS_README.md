@@ -772,3 +772,118 @@ stop and targets. Inspect `GET
 `atm_recommendation` JSON object for unavailable reasons.
 Source work is committed, but Python unit tests and live Dhan
 integration must be verified on the Windows installation.
+
+## Dashboard · NSE Participant Positioning — FII / Pro / Retail
+
+The **Dashboard** now has three **nested colored SVG circles**:
+- Outer circle: FII
+- Middle circle: proprietary traders (PRO)
+- Inner circle: Client (retail category, not exclusively small investors)
+
+Green = positive index-derivatives positioning proxy; red = negative;
+grey = neutral or unknown. Each category has its underlying index
+futures net OI, day-over-day change, normalized futures/options
+positioning score, volume-participation agreement and an observed
+cycle-window net-position change. The UI also shows the observation
+date, available history, expiry calendar status and last NSE fetch.
+
+**Official NSE data:**
+- `https://archives.nseindia.com/content/nsccl/fao_participant_oi_{ddMMyyyy}.csv`
+- `https://archives.nseindia.com/content/nsccl/fao_participant_vol_{ddMMyyyy}.csv`
+
+These expand the two NSE archive directory/prefix URLs supplied for
+the project. The CSV parser validates real header names, the report's
+embedded date when present, participant categories (FII/PRO/CLIENT)
+and every numerical column; NSE HTML errors, 403 responses and missing
+reports fail closed. Source URLs and content hashes are retained with
+daily rows. The HTTP fetcher is bounded and does not use Dhan credentials
+or bypass access restrictions.
+
+**Storage**: `BHARATSIGNAL_INSIGHTS_HOME/participant_positions.sqlite`
+contains the **raw daily OI and volume snapshots** (JSON per report
+row), with an idempotent per-day/per-kind/per-participant primary key
+and both kinds committed in one transaction. DII is also recorded
+if present, though only three categories are visualized.
+
+**Important aggregation limitation**: NSE participant-wise reports
+aggregate across *all index instruments and all expiries*. They do
+NOT break positions down by specific expiry/strike. The module labels
+an **expiry observation window** only, using actual expiry dates
+obtained from Dhan NIFTY `expiry_list` or the locally retained
+`participant_expiry_calendar.json` list. If no verified expiry is
+known, the UI prints UNVERIFIED, not a guessed expiry.
+The first available report in a known cycle is the baseline.
+A cycle change is **latest net OI − first stored net OI**;
+**daily OI snapshots are never summed**.
+If the true start of expiry is not in the archive, the label
+explicitly reads 'observation window', not a complete cycle.
+
+**Heuristic direction** for index derivatives only:
+- Futures score: 100 × (index futures long − short) / total
+- Options proxy: 100 × [(index call long + index put short)
+  − (index call short + index put long)] / total of those legs
+- Participant score: 60% futures + 40% option-proxy; NEUTRAL
+  threshold ±8 units
+- Overall display score: FII 50%, Pro 30%, Client 20%.
+- NSE VOL long/short columns serve only as
+  **participation agreement**, not true executed trade delta,
+  buyer/seller aggressor order flow, or a validated confidence.
+- All three in UP or DOWN prints ALL THREE ALIGN.
+- The model is descriptive; it neither changes option-entry
+  gates nor predicts market moves with a guaranteed probability.
+  The PRO/CLIENT groups can hedge or hold spreads; 'Client'
+  includes more than small retail investors.
+
+**Scheduling** (local app must remain running):
+- 08:00–09:15 IST: try to fetch missing reports from the prior
+  completed trading session.
+- 18:00–19:30 IST and 19:30 onward: try current day's NSE EOD
+  report after publication. If not yet posted/403, old data
+  stays stored and the panel reports PARTIAL/UNAVAILABLE.
+- Backfill is bounded to six recent missing trading sessions
+  per invocation (maximum eight); at most one attempt per time
+  window. Historical window: last ~36 calendar days.
+- All downloading happens in a worker thread, **never the Dhan
+  intraday job lock**. No automatic action occurs when the
+  Windows program or computer is switched off.
+- Dashboard has an explicit `Refresh NSE reports` button.
+
+**Local read-only API:**
+- `GET /api/v1/market-insights/participant-positioning`
+- `POST /api/v1/market-insights/participant-positioning/refresh`
+
+**Modified files:**
+- NEW `insights/nse_participants.py`
+- NEW `insights/participant_refresh.py`
+- NEW `insights/tests/test_nse_participants.py`
+- NEW `insights/tests/test_nse_participant_api.py`
+- UPDATED `insights/service.py`
+- UPDATED `insights/api.py`
+- UPDATED `web/src/main.js`
+- UPDATED `web/src/styles.css`
+
+**Safe Windows update**: stop the local app and back it up. Copy the
+eight files above from the development branch, preserving relative
+paths. Do not overwrite `.env`, the Dhan API credentials,
+SQLite journals, calendar settings or local backtests.
+
+```bat
+cd /d "H:\\BharatSignal_Fusion_Ready\\BharatSignal_Fusion_Insights"
+.venv\\Scripts\\python.exe -m unittest insights.tests.test_nse_participants -v
+.venv\\Scripts\\python.exe -m unittest insights.tests.test_nse_participant_api -v
+.venv\\Scripts\\python.exe -m unittest discover -s tests -q
+.venv\\Scripts\\python.exe -m unittest discover -s insights\\tests -q
+cd web
+npm run build
+cd ..
+START_INSIGHTS.bat
+```
+
+After startup, visit
+`http://127.0.0.1:8765/api/v1/market-insights/participant-positioning`
+and inspect date, refresh.status, participants and expiry_scope.
+If you are online after NSE report publication, click the
+Dashboard's **Refresh NSE reports** button.
+NSE network access is not guaranteed; production live ingestion and
+Windows test suites must be independently validated before trusting
+the displayed signal interpretations.
