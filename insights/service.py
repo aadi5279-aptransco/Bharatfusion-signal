@@ -776,7 +776,10 @@ class InsightsService:
         phase='PRELIMINARY 09:45' if (now.hour,now.minute)<(10,0) else 'FINAL 10:00'
         self._update('index-options',dict(signals=signals,fib_setups=fib_setups,
               opening_setups=opening_setups,opening_ready=sum(x.get('state')=='DIRECTION_READY' for x in opening_setups),
-              status=phase+' — RESEARCH ONLY (OPTION QUOTES UNVERIFIED)' if signals else phase+' — NO QUALIFIED INDEX OPTION SETUPS',
+              status=(phase+' — LEGACY OPTION PLANS + SPOT WATCHES' if signals else
+                      phase+' — SPOT CE/PE WATCHES (PREMIUM UNVERIFIED)'
+                      if any(x.get('state')=='DIRECTION_READY' for x in opening_setups)
+                      else phase+' — NO CONFIRMED SPOT DIRECTION YET'),
               phase=phase,scanned=len(indices),qualified=len(signals),mtf='5m+15m+60m',
               note='Rechecked every 5 minutes. Index direction requires 5m/15m/60m; index volume may be unavailable. Option OI/PCR are positioning proxies; premium age unverified; no trades placed'),now)
         return signals
@@ -790,9 +793,17 @@ class InsightsService:
         # Prefer prior-session ranked symbols, then mapped F&O universe.
         available={_norm(x['symbol']):x for x in self.instruments() if x.get('kind')=='stock'}
         previous=self.snapshot('pre-market')
-        backups=[available.get(_norm(row.get('symbol','')))
-                 for row in (previous.get('gainers',[])+previous.get('losers',[]))]
-        sources=[x for x in (selected+backups+self._stock_list()) if x is not None]
+        up=[x for x in self._shortlist_up if x in selected]
+        down=[x for x in self._shortlist_down if x in selected]
+        up.extend(available.get(_norm(row.get('symbol',''))) for row in previous.get('gainers',[]))
+        down.extend(available.get(_norm(row.get('symbol',''))) for row in previous.get('losers',[]))
+        # Balance BUY/SELL watches rather than consuming the first twelve
+        # slots with gainers. Unmapped rows are ignored.
+        balanced=[]
+        for j in range(max(len(up),len(down))):
+            if j<len(up) and up[j] is not None:balanced.append(up[j])
+            if j<len(down) and down[j] is not None:balanced.append(down[j])
+        sources=balanced+[x for x in selected+self._stock_list() if x is not None]
         picks=[];seen=set()
         for item in sources:
             key=(item.get('segment'),str(item.get('id')))
@@ -844,7 +855,10 @@ class InsightsService:
         phase='PRELIMINARY 09:45' if (now.hour,now.minute)<(10,0) else 'FINAL 10:00'
         self._update('fo-stocks',dict(signals=signals,fib_setups=fib_setups,
               opening_setups=opening_setups,opening_ready=sum(x.get('state')=='DIRECTION_READY' for x in opening_setups),
-              status=phase+' — RESEARCH ONLY (PREMIUM FRESHNESS UNKNOWN)' if signals else phase+' — NO QUALIFIED FUTURES/OI SETUPS',
+              status=(phase+' — LEGACY FUTURES SETUPS + SPOT WATCHES' if signals else
+                      phase+' — SPOT CE/PE WATCHES (PREMIUM UNVERIFIED)'
+                      if any(x.get('state')=='DIRECTION_READY' for x in opening_setups)
+                      else phase+' — NO CONFIRMED SPOT DIRECTION YET'),
               phase=phase,scanned=len(picks),shortlisted=len(selected),
               unavailable_count=unavailable,qualified=len(signals),mtf='15m+60m+Futures OI',
               note='Opening 5m/redbar watches monitor a bounded F&O sample even if the strict shortlist is empty; old futures/MTF trade candidates stay separate. Premium and quote age unverified.'),now)
