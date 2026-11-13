@@ -704,6 +704,43 @@ function SwingOpportunityFinder({data}){
        e('div',{className:'empty'},'No developing watch candidates in the sampled universe.')):null
  );
 }
+function SwingGuideLayer({data}){
+ const rows=data.guide_layer||[];
+ const table=e('table',{className:'research-table'},
+   e('thead',null,e('tr',null,
+      ...['Stock','PDF setups','Status','NIFTY RS','RS rank','Conditional entry',
+         '2×ATR stop','2R target','Vol ratio','Why / exit']
+       .map(v=>e('th',{key:v},v)))),
+   e('tbody',null,...rows.map((x,i)=>e('tr',{key:x.symbol+i},
+      e('td',null,e('strong',null,x.symbol)),
+      e('td',null,(x.matched_setups||[]).join(' · ')),
+      e('td',null,x.readiness||'WATCH'),
+      e('td',null,x.rs_score==null?'UNAVAILABLE':x.rs_score+'%'),
+      e('td',null,x.rs_rank_percentile==null?'—':x.rs_rank_percentile+'th percentile'),
+      e('td',null,price(x.entry)),
+      e('td',null,price(x.stop)),
+      e('td',null,price(x.target_2r)),
+      e('td',null,x.volume_ratio==null?'—':x.volume_ratio+'×'),
+      e('td',null,e('details',null,e('summary',null,'Review evidence'),
+        e('p',{className:'small muted'},'Daily data ',x.asof,
+          ' · ',x.freshness,' · Turnover ₹',x.average_turnover_cr??'—',' Cr'),
+        e('p',{className:'small muted'},'Blockers: ',(x.blockers||[]).join(' · ')||'None'),
+        e('p',{className:'small muted'},x.note),
+        e('ul',null,...Object.entries(x.exit_rules||{}).map(([k,v])=>
+          e('li',{key:k},k+': '+v)))))))));
+ return e(Section,{title:'NEW · Swing Trading Guide — four setups + NIFTY relative strength'},
+   e('p',{className:'small muted'},'20 EMA pullback · tight-base 20-day breakout · RSI(2) oversold dip · Bollinger volatility squeeze. ',
+      'NIFTY-relative 63/126-session returns rank the mapped Dhan sample. Completed daily bars only.'),
+   e('p',{className:'small muted'},'Detected ',data.guide_layer_count??0,
+      ' · Conditional research ',data.guide_layer_conditional??0,
+      ' · Benchmark ',data.guide_benchmark_status||'NOT LOADED',
+      ' · ',data.guide_rs_universe||'Sampled mapped symbols only'),
+   e(Notice,{warning:true},
+     'Conditional BUY-stop levels are next-session research triggers, not fills. ',
+     'Earnings/events, ASM/GSM and gaps may invalidate trades. Position sizing and win probability require user risk settings and backtesting.'),
+   rows.length?e('div',{className:'tablewrap'},table):
+     e('p',{className:'empty'},'No completed-candle PDF strategy matches in the current sampled universe.'));
+}
 function SwingTrades({data}) {
  const rows=data.signals||[];
  const cols=['Symbol','Strategy','Entry','Stop','Target 2R','Target 3R','Risk:Reward','Volume ratio','Trend strength','Gann support','Gann resistance','D/W Wave','Time cycle'];
@@ -721,6 +758,7 @@ function SwingTrades({data}) {
  const table=e('table',{className:'research-table'},e('thead',null,e('tr',null,...cols.map(k=>e('th',{key:k},k)))),tbody);
  return e('div',null,
   e(SwingOpportunityFinder,{data}),
+  e(SwingGuideLayer,{data}),
   e('p',{className:'small muted'},'Completed daily and weekly candles only. Gann price levels, pivot-based trading-day/week cycles and confirmed swing geometry are additional research evidence, not trade filters, win probabilities or predictive Elliott counts. Original 2R/3R levels are unchanged.'),
   e('p',{className:'small muted'},'Status: ',data.status||'Waiting',' · Updated: ',data.updated_at||'—',' · Universe: ',data.universe??'—',
    ' / ',data.available_instrument_master??'—',' available cash stocks'),
