@@ -893,3 +893,27 @@ batch, instead of trying additional dates. Such a response means
 the official archive has blocked or rate-limited automated access;
 the application does not bypass the restriction, fabricate data,
 or erase previously archived records.
+
+### Windows SQLite WinError 32 regression — NSE participant tests
+
+On Windows, the first NSE tests failed at `TemporaryDirectory` teardown:
+`PermissionError: [WinError 32] ... positions.sqlite`. Root cause was
+`with sqlite3.Connection as db` being misread as closing the connection;
+it only commits/rolls back the transaction and leaves the handle open.
+
+`insights/nse_participants.py` now wraps every connection in a
+`@contextmanager` that commits/rolls back and **always calls
+`db.close()` in a `finally` clause**, even on exceptions.
+The existing `with self._connect() as db:` call sites are unchanged.
+The updated `insights/tests/test_nse_participants.py` includes a
+Windows-sensitive regression that renames the SQLite file after writes
+and reads while the store object is still alive.
+
+**Upgrade only these two files** from the development branch:
+`insights/nse_participants.py` and
+`insights/tests/test_nse_participants.py`.
+Run `python -m unittest insights.tests.test_nse_participants -v`
+(13 tests) and `python -m unittest insights.tests.test_nse_participant_api -v`
+(2 tests), then both Python suites. No React rebuild or user database
+deletion is necessary. No broker credentials, signals or DB schema are
+modified by this patch.
