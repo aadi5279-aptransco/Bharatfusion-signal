@@ -334,6 +334,69 @@ function TrackRecord({data}){
       e('tbody',null,(data.backtests||[]).map((v,i)=>e('tr',{key:i},...[v.strategy,v.samples,v.win_rate??'—',v.profit_factor??'—',v.avg_r??'—',v.eligible?'YES':'NO'].map((x,j)=>e('td',{key:j},x))))))):e('p',{className:'muted'},'No independently validated strategy backtests. Trading remains disabled.')),
   e(Section,{title:'Signal journal'},signals.length?e('div',{className:'tablewrap'},e('table',null,e('thead',null,e('tr',null,...['Date','Strategy','Symbol','Direction','Entry','Stop','T1','Outcome'].map(x=>e('th',{key:x},x)))),e('tbody',null,signals.map((s,i)=>e('tr',{key:i},...[s.signal_at,s.strategy,s.symbol,s.direction,price(s.entry),price(s.sl),price(s.t1),s.status].map((v,j)=>e('td',{key:j},v))))))):e('div',{className:'empty'},'Journal is empty. Real observed outcomes will appear here.')));
 }
+function BTSTClosingStrength(){
+ const [view,setView]=useState({status:'WAITING FOR 14:30',candidates:[]});
+ const [error,setError]=useState('');
+ useEffect(()=>{
+   let alive=true;
+   const load=()=>api('/api/v1/market-insights/btst-closing')
+    .then(data=>{if(alive){setView(data);setError('');}})
+    .catch(err=>{if(alive)setError(err.message);});
+   load();
+   const id=setInterval(load,20000);
+   return()=>{alive=false;clearInterval(id);};
+ },[]);
+ const rows=(view.candidates||[]).map((x,i)=>{
+   const cells=[
+     ['Completed 5m price',price(x.observed_close)],
+     ['Near session high',x.proximity_to_high_pct==null?'—':x.proximity_to_high_pct+'% below'],
+     ['Matched-time RVOL',x.matched_volume?.ratio==null?'—':x.matched_volume.ratio+'×'],
+     ['Watch score',x.research_score??'—']
+   ].map(([heading,value])=>e('div',{key:heading},
+       e('span',{className:'small muted'},heading+' '),e('strong',null,value)));
+   const levels=x.entry==null?
+     e('p',{className:'small muted'},'No qualified entry or risk levels yet.'):
+     e('p',null,'Cash trigger ',price(x.entry),' · Stop ',price(x.sl),
+         ' · T1 ',price(x.t1),' · T2 ',price(x.t2));
+   const checks=Object.entries(x.checks||{}).map(([k,v])=>
+      e('li',{key:k},(v?'PASS':'WAIT')+' — '+k.replaceAll('_',' ')));
+   return e('article',{key:x.symbol+i,className:'btst-close-card'},
+     e('div',{className:'signal-top'},
+       e('h3',null,x.symbol),
+       e(Badge,{type:x.entry==null?'warning':'positive'},x.phase||'WATCH')),
+     e('p',{className:'small muted'},x.status||'RESEARCH ONLY'),
+     e('div',{className:'btst-close-stats'},...cells),
+     levels,
+     e('p',{className:'small muted'},
+       '20-day high ',price(x.previous_20day_high),
+       ' · Prior-day high ',price(x.previous_day_high),
+       ' · Futures OI ',x.futures_oi?.classification||'UNAVAILABLE',
+       ' · Delivery ',x.delivery?.status||'UNAVAILABLE'),
+     e('details',null,e('summary',null,'Passed / missing conditions'),
+       e('ul',null,...checks),
+       e('p',{className:'small muted'},
+         'Missing: ',(x.blockers||[]).join(', ')||'None',
+         ' · News/GIFT/US feeds: not verified')));
+ });
+ return e(React.Fragment,null,
+   e(Section,{title:'NEW · BTST Closing Strength (14:30 / 15:05 / 15:20)'},
+      e('p',{className:'small muted'},
+        'Independent of strict BTST. Previous completed daily trend and same-clock historical volume. ',
+        '15:05 is NOT the official auction/closing price.'),
+      e('p',{className:'small muted'},
+        'Status: ',view.status||'WAITING',
+        ' · Phase: ',view.phase||'—',
+        ' · Inspected: ',view.inspected??'—',
+        ' · Confirmed: ',view.confirmed?.length??0,
+        ' · Missing volume history: ',view.missing_matched_volume??'—'),
+      error?e(Notice,{warning:true},error):null,
+      e(Notice,{warning:true},
+        'Research only. Any entry, stop, T1/T2 are CASH stock levels. ',
+        'Overnight gaps, news and actual closing auction prices can differ; no orders.')),
+   e(Section,{title:'Ranked pre-close research watchlist'},
+     rows.length?e('div',{className:'btst-close-list'},...rows):
+       e('div',{className:'empty'},'Awaiting 14:30 scan or verified cash candles.')));
+}
 function ReadinessPanel(){
  const [state,setState]=useState(null);const [loading,setLoading]=useState(true);
  useEffect(()=>{let live=true;api('/api/v1/market-insights/readiness')
@@ -635,6 +698,7 @@ function App(){
     active==='Multibagger'?e(MultibaggerResearch,{data}):null,
     ['Intraday','BTST','Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
      e(ReadinessPanel),
+     active==='BTST'?e(BTSTClosingStrength):null,
      e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'09:45 Preview · 10:00 Final · 5m Follow-up':active==='BTST'?'Scheduled 15:00 IST':'Opening 09:30 · every 5m · research'}),
        e(Tile,{title:['Index Options','F&O Stocks'].includes(active)?'SPOT WATCHES + LEGACY':'CANDIDATES',
            value:(data.signals||[]).length+(['Index Options','F&O Stocks'].includes(active)?(data.opening_ready||0):0),
