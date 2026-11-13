@@ -40,6 +40,11 @@ class ParticipantError(ValueError):
     pass
 
 
+class NSEAccessDenied(ParticipantError):
+    """Stop the batch when the official NSE host blocks automated access."""
+    pass
+
+
 def _norm(x):
     return re.sub(r"[^a-z0-9]","",str(x).strip().lower())
 
@@ -121,7 +126,12 @@ def fetch_csv(kind,trade_day,timeout=12):
             if not final.startswith("https://archives.nseindia.com/content/nsccl/"):
                 raise ParticipantError("NSE source redirected outside official archive path")
             data=response.read(131073)
-    except (HTTPError,URLError,TimeoutError,OSError) as exc:
+    except HTTPError as exc:
+        if exc.code in (403,429):
+            raise NSEAccessDenied("Official NSE returned HTTP "+str(exc.code)+
+                                  "; no further downloads attempted") from exc
+        raise ParticipantError("Official NSE "+kind.upper()+" report not available") from exc
+    except (URLError,TimeoutError,OSError) as exc:
         raise ParticipantError("Official NSE "+kind.upper()+" report inaccessible") from exc
     return data
 
