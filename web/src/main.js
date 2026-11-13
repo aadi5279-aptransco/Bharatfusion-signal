@@ -639,6 +639,71 @@ function IntradaySignals({data}){
           e('td',null,x.data_asof),e('td',null,x.status))))))):null);
 }
 
+function SwingOpportunityFinder({data}){
+ const [showWatch,setShowWatch]=useState(true);
+ const ready=data.opportunity_ready||[];
+ const watch=data.opportunity_watch||[];
+ function cards(rows,style){
+  return rows.map((x,i)=>{
+   const gw=x.swing_gann_wave||{};
+   const checks=Object.entries(x.checks||{}).map(([k,v])=>
+     e('li',{key:k},(v?'PASS':'WAIT')+' · '+k.replaceAll('_',' ')));
+   const levels=x.entry==null?
+     e('p',{className:'small muted'},'No conditional trade levels until all rules confirm.'):
+     e('p',null,'NEXT-SESSION TRIGGER ',price(x.entry),
+       ' · SL ',price(x.stop),' · T1 2R ',price(x.target),
+       ' · T2 3R ',price(x.target_3r));
+   return e('article',{className:'swing-opportunity',key:x.symbol+i},
+     e('div',{className:'research-candidate-header'},
+       e('strong',null,x.symbol),
+       e(Badge,{type:style},x.readiness||'WATCH'),
+       e('strong',null,'Score ',x.score??'—',' /100')),
+     e('p',null,'Setup: ',x.setup,
+       ' · Daily trend: ',x.daily_trend,
+       ' · Weekly trend: ',x.weekly_trend),
+     e('p',{className:'small muted'},'Daily close ',price(x.close),
+       ' · Prior 20d high ',price(x.breakout_level),
+       ' · Relative volume ',x.volume_ratio??'—','×',
+       ' · RSI14 ',x.rsi14??'—'),
+     levels,
+     e('p',{className:'small muted'},'EMA21 ',price(x.ema21),
+       ' · EMA50 ',price(x.ema50),' · EMA200 ',price(x.ema200),
+       ' · Avg traded value ₹',x.avg_traded_value_lakh??'—',' lakh'),
+     e('p',{className:'small muted'},
+       'Gann: ',gw.gann?.support??'—',' / ',gw.gann?.resistance??'—',
+       ' · Daily/weekly swing: ',gw.wave?.daily_structure||'—',' / ',
+          gw.wave?.weekly_structure||'—'),
+     e('p',{className:'small muted'},x.fii_evidence_scope||'No verified FII transaction evidence'),
+     e('details',null,
+       e('summary',null,'Screening conditions and blockers'),
+       e('ul',null,...checks),
+       e('p',{className:'small muted'},'Not met: ',
+         (x.blockers||[]).join(' · ')||'None')));
+  });
+ }
+ return e('div',null,
+   e(Section,{title:'NEW · Swing Opportunity Finder (daily + weekly)'},
+     e('p',{className:'small muted'},
+       'Independent 20-day closing breakouts and EMA21 pullback recovery watches, from completed daily and weekly candles.'),
+     e('div',{className:'tile-grid'},
+       e(Tile,{title:'READY',value:ready.length}),
+       e(Tile,{title:'DEVELOPING WATCH',value:watch.length}),
+       e(Tile,{title:'OPPORTUNITIES',value:data.opportunity_count??'—'}),
+       e(Tile,{title:'UNIVERSE',value:data.universe??'—',sub:'Mapped '+(data.available_instrument_master??'—')})),
+     e(Notice,{warning:true},
+       'Research only: no win probability. Triggers are not fills; overnight gaps and circuit risk may bypass stops.'),
+     e('label',null,
+       e('input',{type:'checkbox',checked:showWatch,
+         onChange:event=>setShowWatch(event.target.checked)}),
+       ' Show developing watchlist')),
+   e(Section,{title:'Conditional READY setups · 2R and 3R'},
+     ready.length?e('div',{className:'swing-opportunities'},...cards(ready,'positive')):
+       e('div',{className:'empty'},'No completed breakout or pullback currently meets all rule and risk guards.')),
+   showWatch?e(Section,{title:'Developing swing watches · no entry levels'},
+     watch.length?e('div',{className:'swing-opportunities'},...cards(watch,'warning')):
+       e('div',{className:'empty'},'No developing watch candidates in the sampled universe.')):null
+ );
+}
 function SwingTrades({data}) {
  const rows=data.signals||[];
  const cols=['Symbol','Strategy','Entry','Stop','Target 2R','Target 3R','Risk:Reward','Volume ratio','Trend strength','Gann support','Gann resistance','D/W Wave','Time cycle'];
@@ -655,6 +720,7 @@ function SwingTrades({data}) {
  }));
  const table=e('table',{className:'research-table'},e('thead',null,e('tr',null,...cols.map(k=>e('th',{key:k},k)))),tbody);
  return e('div',null,
+  e(SwingOpportunityFinder,{data}),
   e('p',{className:'small muted'},'Completed daily and weekly candles only. Gann price levels, pivot-based trading-day/week cycles and confirmed swing geometry are additional research evidence, not trade filters, win probabilities or predictive Elliott counts. Original 2R/3R levels are unchanged.'),
   e('p',{className:'small muted'},'Status: ',data.status||'Waiting',' · Updated: ',data.updated_at||'—',' · Universe: ',data.universe??'—',
    ' / ',data.available_instrument_master??'—',' available cash stocks'),
