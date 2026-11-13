@@ -491,7 +491,10 @@ function App(){
     ['Intraday','BTST','Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
      e(ReadinessPanel),
      e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'09:45 Preview · 10:00 Final · 5m Follow-up':active==='BTST'?'Scheduled 15:00 IST':'Every 5 min after 10:00 · research'}),
-       e(Tile,{title:'CANDIDATES',value:(data.signals||[]).length,sub:active==='Intraday'?`BUY ${data.qualified_buy||0} · SELL ${data.qualified_sell||0}`:''}),e(Tile,{title:'STATUS',value:data.status||'Waiting'}),e(Tile,{title:'LAST SCAN',value:data.updated_at||'Not yet run'})),
+       e(Tile,{title:['Index Options','F&O Stocks'].includes(active)?'SPOT WATCHES + LEGACY':'CANDIDATES',
+           value:(data.signals||[]).length+(['Index Options','F&O Stocks'].includes(active)?(data.opening_ready||0):0),
+           sub:active==='Intraday'?`BUY ${data.qualified_buy||0} · SELL ${data.qualified_sell||0}`:
+             ['Index Options','F&O Stocks'].includes(active)?`Directional watches ${data.opening_ready||0} · Legacy option scenarios ${(data.signals||[]).length}`:''}),e(Tile,{title:'STATUS',value:data.status||'Waiting'}),e(Tile,{title:'LAST SCAN',value:data.updated_at||'Not yet run'})),
      data.scanned!=null?e('p',{className:'small muted'},
        'Deep universe: ',data.universe_scanned_at_discovery??data.scanned,' · Broad quote coverage: ',data.breadth_quotes??'—',
        ' · Discovery method: ',data.discovery_mode??'—',' · Locked shortlist: ',data.shortlisted??data.shortlist_size??'—',
