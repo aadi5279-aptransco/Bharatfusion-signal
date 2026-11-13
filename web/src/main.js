@@ -310,14 +310,21 @@ function IntradaySignals({data}){
 
 function SwingTrades({data}) {
  const rows=data.signals||[];
- const cols=['Symbol','Strategy','Entry','Stop','Target 2R','Target 3R','Risk:Reward','Volume ratio','Trend strength'];
+ const cols=['Symbol','Strategy','Entry','Stop','Target 2R','Target 3R','Risk:Reward','Volume ratio','Trend strength','Gann support','Gann resistance','D/W Wave','Time cycle'];
  const tbody=e('tbody',null,...rows.map((x,i)=>{
-   const values=[x.symbol,x.strategy,price(x.entry),price(x.stop),price(x.target),price(x.target_3r),x.risk_reward??'—',x.volume_ratio==null?'—':x.volume_ratio+'×',x.trend_strength??'—'];
+   const gw=x.swing_gann_wave||{},wave=gw.wave||{},cycles=gw.time_cycle||{};
+   const values=[x.symbol,x.strategy,price(x.entry),price(x.stop),
+     price(x.target),price(x.target_3r),x.risk_reward??'—',
+     x.volume_ratio==null?'—':x.volume_ratio+'×',x.trend_strength??'—',
+     gw.gann?.support??'—',gw.gann?.resistance??'—',
+     (wave.daily_structure||'—')+' / '+(wave.weekly_structure||'—'),
+     'D '+((cycles.near_daily_sessions||[]).join(',')||'—')+
+       ' · W '+((cycles.near_weekly_bars||[]).join(',')||'—')];
    return e('tr',{key:i},...values.map((v,j)=>e('td',{key:j},v)));
  }));
  const table=e('table',{className:'research-table'},e('thead',null,e('tr',null,...cols.map(k=>e('th',{key:k},k)))),tbody);
  return e('div',null,
-  e('p',{className:'small muted'},'Daily completed candles only. Entries/targets are research reference levels, not live orders.'),
+  e('p',{className:'small muted'},'Completed daily and weekly candles only. Gann price levels, pivot-based trading-day/week cycles and confirmed swing geometry are additional research evidence, not trade filters, win probabilities or predictive Elliott counts. Original 2R/3R levels are unchanged.'),
   e('p',{className:'small muted'},'Status: ',data.status||'Waiting',' · Updated: ',data.updated_at||'—',' · Universe: ',data.universe??'—',
    ' / ',data.available_instrument_master??'—',' available cash stocks'),
   e(Section,{title:'Swing setups · ranked by Risk:Reward and trend strength'},
