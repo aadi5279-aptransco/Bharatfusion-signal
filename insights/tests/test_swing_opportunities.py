@@ -67,6 +67,18 @@ class SwingFinderTests(unittest.TestCase):
         result=swing_opportunities.evaluate(broken,'DEMO',self.asof)
         self.assertIsNone(result['entry'])
         self.assertEqual(result['status'],'UNAVAILABLE')
+    def test_utc_index_preserves_exchange_session_and_weekly_buckets(self):
+        clean=swing_opportunities.evaluate(self.frame,'DEMO',self.asof)
+        converted=swing_opportunities.evaluate(self.frame.tz_convert('UTC'),'DEMO',self.asof)
+        self.assertEqual(clean,converted)
+    def test_mixed_index_rejects_naive_and_duplicate_instants(self):
+        for stamp in (self.frame.index[-1].tz_localize(None),
+                      self.frame.index[-1].tz_convert('UTC')):
+            extra=self.frame.iloc[-1:].copy()
+            extra.index=pd.Index([stamp])
+            result=swing_opportunities.evaluate(pd.concat([self.frame,extra]),'DEMO',self.asof)
+            self.assertEqual(result['status'],'UNAVAILABLE')
+            self.assertIsNone(result['entry'])
     def test_watch_state_never_invents_stop_or_targets(self):
         frame=self.frame.copy()
         last=frame.index[-1]
@@ -106,3 +118,4 @@ class SwingFinderTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+

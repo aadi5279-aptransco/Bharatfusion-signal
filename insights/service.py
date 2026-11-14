@@ -9,6 +9,7 @@ from insights.config import IST,ROOT,WATCHLIST,MAX_SYMBOLS,is_market_session
 from insights.db import Journal
 from insights.participant_refresh import ParticipantRefresh
 from insights.fii_stock_deals import FIIStockDeals
+from insights.fii_holdings import FIIHoldings
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
@@ -48,6 +49,7 @@ class InsightsService:
         self.journal=Journal(self.root/'insights.sqlite')
         self.participant_manager=ParticipantRefresh(self.root,_holiday_set,self._participant_expiries)
         self.fii_deals_manager=FIIStockDeals(self.root,_holiday_set)
+        self.fii_holdings_manager=FIIHoldings(self.root)
         self._lock=threading.RLock();self._job_lock=threading.Lock()
         self._instruments=[];self._last_error='';self._timestamps={};self._snapshots={
           'dashboard':{'indices':[],'sectors':[],'status':'WAITING FOR DATA'},
@@ -1147,7 +1149,9 @@ class InsightsService:
         # licensed benchmark candles are absent.
         benchmark=None
         try:
-            nifty_item=next((x for x in self.instruments()
+            benchmark_items=(self.instruments()
+                if callable(getattr(self.broker,'instruments',None)) else [])
+            nifty_item=next((x for x in benchmark_items
               if x.get('kind')=='index' and _norm(x['symbol']) in ('NIFTY','NIFTY50')),None)
             if nifty_item is not None:
                 benchmark=self.broker.daily(nifty_item,now,days=1300)
@@ -1455,3 +1459,4 @@ class InsightsService:
         self._thread=threading.Thread(target=loop,daemon=True,name='MarketInsightsScheduler');self._thread.start()
 
     def stop(self):self._stop.set()
+

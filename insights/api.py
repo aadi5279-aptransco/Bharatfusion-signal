@@ -10,9 +10,50 @@ def create_app(service=None):
     from flask import Flask,request,jsonify,send_from_directory
     path=Path(__file__).resolve().parent.parent/'web'/'dist'
     app=Flask(__name__,static_folder=None)
-    app.config.update(MAX_CONTENT_LENGTH=16384,JSON_SORT_KEYS=False)
+    app.config.update(MAX_CONTENT_LENGTH=2_100_000,JSON_SORT_KEYS=False)
     service=service or InsightsService()
     app.extensions['insights_service']=service
+    @app.before_request
+    def limit_requests():
+        # Only the CSV import needs a larger body than existing endpoints.
+        if request.path!='/api/v1/market-insights/fii-holdings/import' and (request.content_length or 0)>16384:
+            return jsonify(error='Request too large'),413
+        if request.method=='POST' and request.path.startswith('/api/v1/market-insights/fii-holdings/'):
+            if request.remote_addr not in ('127.0.0.1','::1'):
+                return jsonify(error='Local requests only'),403
+            origin=request.headers.get('Origin')
+            if origin and origin!=request.host_url.rstrip('/'):
+                return jsonify(error='Same-origin requests only'),403
+
+    @app.get('/api/v1/market-insights/fii-holdings')
+    def fii_holdings():
+        result=service.fii_holdings_manager.snapshot()
+        # The deal symbols define a scan universe, not verified FII activity.
+        symbols=sorted({r[2] for r in service.fii_deals_manager.store.recent(15)})
+        result.update(deal_symbols=symbols[:200],deal_symbol_count=len(symbols))
+        return jsonify(result)
+
+    @app.get('/api/v1/market-insights/fii-holdings/template')
+    def fii_holdings_template():
+        return app.response_class('Symbol,Previous pct,Current pct,Previous quarter,Current quarter\r\n',
+            mimetype='text/csv',headers={'Content-Disposition':'attachment; filename=fii_holdings_template.csv'})
+
+    @app.post('/api/v1/market-insights/fii-holdings/refresh')
+    def refresh_fii_holdings():
+        payload=request.get_json(silent=True)
+        if not isinstance(payload,dict):return jsonify(error='Expected JSON with symbols'),400
+        try:result=service.fii_holdings_manager.start(payload.get('symbols'))
+        except ValueError as exc:return jsonify(error=str(exc)),400
+        status=result['status']
+        return jsonify(result),202 if status=='STARTED' else 409 if status=='BUSY' else 429
+
+    @app.post('/api/v1/market-insights/fii-holdings/import')
+    def import_fii_holdings():
+        upload=request.files.get('file')
+        if upload is None:return jsonify(error='Choose a CSV file'),400
+        try:result=service.fii_holdings_manager.import_csv(upload.stream.read(2_000_001))
+        except (ValueError,UnicodeError) as exc:return jsonify(error=str(exc)),400
+        return jsonify(result)
     # This is always loopback; Flask dev server is NOT for a public-facing deployment.
     @app.after_request
     def safe_headers(response):
@@ -106,3 +147,4 @@ def create_app(service=None):
         if resource and (path/resource).is_file():return send_from_directory(path,resource)
         return send_from_directory(path,'index.html')
     return app
+

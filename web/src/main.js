@@ -397,6 +397,101 @@ function BTSTClosingStrength(){
      rows.length?e('div',{className:'btst-close-list'},...rows):
        e('div',{className:'empty'},'Awaiting 14:30 scan or verified cash candles.')));
 }
+function FIIHoldingsPanel(){
+ const [data,setData]=useState({increased:[],decreased:[],queries:{},query_urls:{},refresh:{}});
+ const [symbols,setSymbols]=useState('');const [error,setError]=useState('');
+ const [busy,setBusy]=useState(false);const [search,setSearch]=useState('');
+ const [side,setSide]=useState('increased');const [minimum,setMinimum]=useState('0');
+ const [page,setPage]=useState(0);const [file,setFile]=useState(null);
+ const seeded=useRef(false);
+ const load=async()=>{
+   const value=await api('/api/v1/market-insights/fii-holdings');setData(value);
+   if(!seeded.current){setSymbols((value.starter_symbols||[]).join(', '));seeded.current=true;}
+ };
+ useEffect(()=>{
+   let alive=true;
+   const poll=()=>api('/api/v1/market-insights/fii-holdings').then(value=>{
+     if(!alive)return;setData(value);
+     if(!seeded.current){setSymbols((value.starter_symbols||[]).join(', '));seeded.current=true;}
+   }).catch(err=>{if(alive)setError(err.message)});
+   poll();const id=setInterval(poll,3000);return()=>{alive=false;clearInterval(id);};
+ },[]);
+ const scan=async()=>{
+   setBusy(true);setError('');
+   try{await api('/api/v1/market-insights/fii-holdings/refresh',{
+     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbols})});await load();}
+   catch(err){setError(err.message)}finally{setBusy(false)}
+ };
+ const importFile=async()=>{
+   if(!file)return;setBusy(true);setError('');
+   try{const form=new FormData();form.append('file',file);
+     await api('/api/v1/market-insights/fii-holdings/import',{method:'POST',body:form});
+     setPage(0);await load();
+   }catch(err){setError(err.message)}finally{setBusy(false)}
+ };
+ const running=data.refresh?.status==='RUNNING';
+ const rows=(data[side]||[]).filter(x=>Math.abs(x.change_pp)>=Math.max(0,Number(minimum)||0)&&
+   ((x.symbol||'')+' '+x.company).toLowerCase().includes(search.toLowerCase()));
+ const maxPage=Math.max(0,Math.ceil(rows.length/50)-1),shownPage=Math.min(page,maxPage);
+ const shown=rows.slice(shownPage*50,(shownPage+1)*50);
+ const pct=n=>Number(n).toFixed(2)+'%';
+ return e(Section,{title:'FII ownership — stocks with increased or decreased holdings'},
+   e('p',{className:'muted'},'Compare the last two reported quarters. These lists do not need an FPI client-name registry.'),
+   e('div',{className:'tile-grid'},
+     e(Tile,{title:'HOLDING INCREASED',value:(data.increased||[]).length,sub:'Stocks in the saved comparison'}),
+     e(Tile,{title:'HOLDING DECREASED',value:(data.decreased||[]).length,sub:'Stocks in the saved comparison'}),
+     e(Tile,{title:'UNCHANGED',value:data.unchanged_count||0}),
+     e(Tile,{title:'SCAN PROGRESS',value:`${data.refresh.completed||0} / ${data.refresh.requested||0}`,sub:data.refresh.status||'NOT SCANNED'})),
+   e('label',{htmlFor:'fii-symbols'},'NSE symbols to scan (up to 200)'),
+   e('textarea',{id:'fii-symbols',rows:3,value:symbols,onChange:event=>setSymbols(event.target.value),className:'fii-symbols'}),
+   e('p',{className:'small muted'},'Starts with a 25-stock example basket, not the whole market or a current index list. Edit it to scan your stocks. Results are cached for 24 hours; unavailable stocks are reported below.'),
+   e('div',{className:'fii-controls'},
+     e('button',{type:'button',onClick:scan,disabled:busy||running},running?'Scanning…':'Scan quarterly FII holdings'),
+     (data.deal_symbols||[]).length?e('button',{type:'button',disabled:busy||running,
+       onClick:()=>setSymbols(data.deal_symbols.join(', '))},
+       `Use downloaded deal stocks (${data.deal_symbols.length} of ${data.deal_symbol_count})`):null,
+     e('span',{className:'small muted'},data.refresh.current_symbol||'')),
+   error?e(Notice,{warning:true},error):null,
+   data.refresh.error?e(Notice,{warning:true},data.refresh.error):null,
+   e('p',{className:'small muted'},'Saved coverage: ',data.coverage?.mode||'No results yet',
+     ' · Stocks: ',data.coverage?.available??0,' · Saved at: ',data.coverage?.finished_at||'—'),
+   (data.refresh.coverage?.failures||[]).length?e('details',null,
+     e('summary',null,'Unavailable stocks / source errors (',data.refresh.coverage.failures.length,')'),
+     ...data.refresh.coverage.failures.map(x=>e('p',{key:x.symbol,className:'small'},x.symbol,': ',x.error)),
+     e('p',{className:'small'},'Not attempted: ',(data.refresh.coverage.not_attempted||[]).join(', ')||'None')):null,
+   e('details',{className:'fii-import'},e('summary',null,'Scan a wider market with Screener queries / import CSV'),
+     e('p',{className:'small'},'Open either query, sign in to Screener if required, add FII holding and Change in FII holding columns, and export your results. Save as CSV (UTF-8) if the download is Excel. Import a combined file to see both lists together.'),
+     ...Object.entries(data.queries||{}).map(([key,q])=>e('div',{key},
+       e('a',{href:data.query_urls[key],target:'_blank',rel:'noopener noreferrer'},key==='increased'?'Open increased-holding query':'Open decreased-holding query'),
+       e('pre',null,q))),
+     e('p',{className:'small'},'Required export columns: Name or Symbol, FII holding, Change in FII holding. Exports without quarter dates are marked “period not supplied”. No company-name-to-ticker guesses are made.'),
+     e('a',{href:'/api/v1/market-insights/fii-holdings/template'},'Download dated CSV headers'),
+     e('div',{className:'fii-controls'},
+       e('input',{type:'file',accept:'.csv,.tsv,text/csv',onChange:ev=>setFile(ev.target.files?.[0]||null),'aria-label':'Holdings CSV'}),
+       e('button',{type:'button',disabled:busy||running||!file,onClick:importFile},'Import CSV — replace saved list'))),
+   e('div',{className:'fii-controls'},
+     e('button',{type:'button','aria-pressed':side==='increased',onClick:()=>{setSide('increased');setPage(0)}},'Increased holdings'),
+     e('button',{type:'button','aria-pressed':side==='decreased',onClick:()=>{setSide('decreased');setPage(0)}},'Decreased holdings'),
+     e('input',{value:search,placeholder:'Search stock or company','aria-label':'Search holdings',onChange:ev=>{setSearch(ev.target.value);setPage(0)}}),
+     e('label',null,'Minimum change (pp) ',e('input',{type:'number',min:0,max:100,step:0.1,value:minimum,onChange:ev=>{setMinimum(ev.target.value);setPage(0)}}))),
+   shown.length?e('div',{className:'tablewrap'},e('table',{className:'research-table'},
+     e('thead',null,e('tr',null,...['Stock / company','Previous holding','Latest holding','Change (pp)','Reporting quarters','Source / freshness'].map(h=>e('th',{key:h},h)))),
+     e('tbody',null,...shown.map((x,i)=>e('tr',{key:(x.symbol||x.company)+i},
+       e('td',null,e('strong',null,x.symbol||x.company)),
+       e('td',null,pct(x.previous_pct)),e('td',null,pct(x.current_pct)),
+       e('td',{className:x.change_pp>0?'gain':'loss'},(x.change_pp>0?'+':'')+x.change_pp.toFixed(2)),
+       e('td',null,x.period_verified?`${x.previous_quarter} → ${x.current_quarter}`:'Period not supplied — provider change'),
+       e('td',null,e('a',{href:x.source_url,target:'_blank',rel:'noopener noreferrer'},x.source),
+         e('div',{className:'small muted'},'Fetched/imported: ',x.retrieved_at),
+         x.stale_quarter?e(Badge,{type:'warning'},'REPORT OLDER THAN 180 DAYS'):null)))))):
+     e('p',{className:'empty'},running?'Reading public quarterly holdings…':'No matching saved rows. Run a symbol scan or import a CSV; an empty list does not mean no FII activity.'),
+   rows.length>50?e('div',{className:'fii-controls'},
+     e('button',{disabled:shownPage===0,onClick:()=>setPage(shownPage-1)},'Previous'),
+     e('span',null,`${shownPage*50+1}–${Math.min((shownPage+1)*50,rows.length)} of ${rows.length}`),
+     e('button',{disabled:shownPage>=maxPage,onClick:()=>setPage(shownPage+1)},'Next')):null,
+   e(Notice,null,data.note||'Ownership changes are quarterly research, not daily transactions.'));
+}
+
 function FIIStockDealsPanel(){
  const [data,setData]=useState({bought:[],sold:[],status:'WAITING FOR VERIFIED NSE DISCLOSURES'});
  const [error,setError]=useState('');
@@ -438,6 +533,7 @@ function FIIStockDealsPanel(){
               e('a',{href:x.verification_source,target:'_blank',rel:'noopener noreferrer'},'FPI identity'))))))):
        e('p',{className:'empty'},'No attributable FII/FPI '+kind+' disclosure found in stored reports. This does NOT mean FIIs made no '+kind.toLowerCase()+' trades.'));
  return e('div',null,
+   e(FIIHoldingsPanel),
    e(Section,{title:'NSE disclosed foreign institutional stock transactions'},
      e('p',{className:'small muted'},'Only verified FII/FPI-name bulk and block deal disclosures; NOT all daily foreign institutional stock buying or selling. Aggregate FII index derivatives OI cannot identify individual stocks.'),
      e('div',{className:'tile-grid'},
@@ -450,6 +546,7 @@ function FIIStockDealsPanel(){
      e('p',{className:'small muted'},'Source: NSE public bulk/block disclosures · Identity registry matches: ',data.verified_client_names??0,
         ' · Refresh: ',data.refresh?.status||'NOT STARTED'),
      error?e(Notice,{warning:true},error):null,
+     !data.verified_client_names?e(Notice,{warning:true},'No verified FPI names are configured. The downloaded deals cannot be labelled as FII transactions. Use the quarterly ownership scan above for stock lists.'):null,
      e(Notice,{warning:true},'FII labels require documented identity confirmation. Unknown clients remain unclassified. Results are historical disclosures only, not complete institutional flow or trade recommendations.')),
    e('div',{className:'fii-deals-columns'},
       group('FII / FPI bought stocks',data.bought||[],'BUY'),
@@ -901,3 +998,4 @@ function App(){
 }
 
 createRoot(document.getElementById('root')).render(e(App));
+
