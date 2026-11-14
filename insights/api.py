@@ -19,12 +19,20 @@ def create_app(service=None):
         # Only the CSV import needs a larger body than existing endpoints.
         if request.path not in ('/api/v1/market-insights/fii-holdings/import','/api/v1/market-insights/scanner/metadata') and (request.content_length or 0)>16384:
             return jsonify(error='Request too large'),413
-        if request.method=='POST' and request.path.startswith(('/api/v1/market-insights/fii-holdings/','/api/v1/market-insights/scanner/')):
+        if request.method=='POST' and request.path.startswith(('/api/v1/market-insights/fii-holdings/','/api/v1/market-insights/scanner/','/api/v1/market-insights/positional/')):
             if request.remote_addr not in ('127.0.0.1','::1'):
                 return jsonify(error='Local requests only'),403
             origin=request.headers.get('Origin')
             if origin and origin!=request.host_url.rstrip('/'):
                 return jsonify(error='Same-origin requests only'),403
+
+    @app.get('/api/v1/market-insights/positional')
+    def positional():return jsonify(service.positional_scanner.snapshot())
+
+    @app.post('/api/v1/market-insights/positional/refresh')
+    def positional_refresh():
+        result=service.positional_scanner.request()
+        return jsonify(result),202 if result['status']=='STARTED' else 409
 
     def scanner_query(export=False):
         raw=request.args.get('filters','{}')

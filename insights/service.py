@@ -11,6 +11,7 @@ from insights.participant_refresh import ParticipantRefresh
 from insights.fii_stock_deals import FIIStockDeals
 from insights.fii_holdings import FIIHoldings
 from insights.stock_scanner import StockScanner
+from insights.positional import PositionalScanner
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
@@ -75,6 +76,7 @@ class InsightsService:
         except (OSError,ValueError,TypeError):
             pass
         self.stock_scanner=StockScanner(self.broker,self.root,_holiday_set,self._job_lock)
+        self.positional_scanner=PositionalScanner(self.broker,self.root,_holiday_set,self._job_lock)
         self._done=set();self._thread=None;self._stop=threading.Event()
         self._shortlist_date=None
         self._shortlist_finalized=False
@@ -1444,6 +1446,7 @@ class InsightsService:
 
     def start(self):
         if self._thread:return
+        self.positional_scanner.start()
         def loop():
             while not self._stop.is_set():
                 # Official participant CSV download is independent from
@@ -1463,4 +1466,5 @@ class InsightsService:
     def stop(self):
         self._stop.set()
         self.stock_scanner.cancel()
+        self.positional_scanner.stop()
 
