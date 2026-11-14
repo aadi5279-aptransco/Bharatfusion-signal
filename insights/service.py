@@ -10,6 +10,7 @@ from insights.db import Journal
 from insights.participant_refresh import ParticipantRefresh
 from insights.fii_stock_deals import FIIStockDeals
 from insights.fii_holdings import FIIHoldings
+from insights.stock_scanner import StockScanner
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
@@ -73,6 +74,7 @@ class InsightsService:
                 self._snapshots['pre-market']=saved
         except (OSError,ValueError,TypeError):
             pass
+        self.stock_scanner=StockScanner(self.broker,self.root,_holiday_set,self._job_lock)
         self._done=set();self._thread=None;self._stop=threading.Event()
         self._shortlist_date=None
         self._shortlist_finalized=False
@@ -1458,5 +1460,7 @@ class InsightsService:
                 self._stop.wait(20)
         self._thread=threading.Thread(target=loop,daemon=True,name='MarketInsightsScheduler');self._thread.start()
 
-    def stop(self):self._stop.set()
+    def stop(self):
+        self._stop.set()
+        self.stock_scanner.cancel()
 

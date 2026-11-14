@@ -2,6 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 from datetime import datetime
+import csv,io,json
 from insights.config import IST,API_BIND
 from insights.service import InsightsService,DISCLAIMER
 
@@ -16,14 +17,64 @@ def create_app(service=None):
     @app.before_request
     def limit_requests():
         # Only the CSV import needs a larger body than existing endpoints.
-        if request.path!='/api/v1/market-insights/fii-holdings/import' and (request.content_length or 0)>16384:
+        if request.path not in ('/api/v1/market-insights/fii-holdings/import','/api/v1/market-insights/scanner/metadata') and (request.content_length or 0)>16384:
             return jsonify(error='Request too large'),413
-        if request.method=='POST' and request.path.startswith('/api/v1/market-insights/fii-holdings/'):
+        if request.method=='POST' and request.path.startswith(('/api/v1/market-insights/fii-holdings/','/api/v1/market-insights/scanner/')):
             if request.remote_addr not in ('127.0.0.1','::1'):
                 return jsonify(error='Local requests only'),403
             origin=request.headers.get('Origin')
             if origin and origin!=request.host_url.rstrip('/'):
                 return jsonify(error='Same-origin requests only'),403
+
+    def scanner_query(export=False):
+        raw=request.args.get('filters','{}')
+        if len(raw)>5000:raise ValueError('Too many filters')
+        return service.stock_scanner.snapshot(filters=json.loads(raw),
+            sort=request.args.get('sort','symbol'),order=request.args.get('order','asc'),
+            page=1 if export else int(request.args.get('page',1)),
+            page_size=10000 if export else min(100,int(request.args.get('page_size',50))))
+
+    @app.get('/api/v1/market-insights/scanner')
+    def scanner():
+        try:return jsonify(scanner_query())
+        except (ValueError,TypeError) as exc:return jsonify(error=str(exc)),400
+
+    @app.post('/api/v1/market-insights/scanner/refresh')
+    def scanner_refresh():
+        try:result=service.stock_scanner.start(request.get_json(silent=True))
+        except (ValueError,TypeError) as exc:return jsonify(error=str(exc)),400
+        status=result['status']
+        return jsonify(result),202 if status=='STARTED' else 409 if status=='BUSY' else 429 if status=='RATE_LIMITED' else 503
+
+    @app.post('/api/v1/market-insights/scanner/cancel')
+    def scanner_cancel():return jsonify(service.stock_scanner.cancel())
+
+    @app.post('/api/v1/market-insights/scanner/metadata')
+    def scanner_metadata():
+        upload=request.files.get('file')
+        if upload is None:return jsonify(error='Choose a metadata CSV'),400
+        try:return jsonify(service.stock_scanner.import_metadata(upload.stream.read(2_000_001)))
+        except (ValueError,UnicodeError) as exc:return jsonify(error=str(exc)),400
+
+    @app.get('/api/v1/market-insights/scanner/metadata-template')
+    def scanner_metadata_template():
+        return app.response_class('Exchange,Security ID,As of,Source,Sector,Industry,Indices,Market cap cr,PE,ROE,Debt equity,Dividend yield\r\n',
+            mimetype='text/csv',headers={'Content-Disposition':'attachment; filename=scanner_metadata.csv'})
+
+    @app.get('/api/v1/market-insights/scanner/export')
+    def scanner_export():
+        try:result=scanner_query(export=True)
+        except (ValueError,TypeError) as exc:return jsonify(error=str(exc)),400
+        columns=['symbol','company','exchange','security_id','fno','sector','industry','price','change_pct','volume',
+                 'avg_volume','rvol','rsi','sma20','sma50','sma200','perf_week','perf_month','perf_quarter',
+                 'market_cap_cr','pe','roe','debt_equity','dividend_yield','metadata_asof','metadata_source','asof','freshness','source']
+        buf=io.StringIO();writer=csv.writer(buf);writer.writerow(columns)
+        def safe(v):
+            if isinstance(v,str) and v.lstrip().startswith(('=','+','-','@')):return "'"+v
+            return '' if v is None else v
+        for row in result['rows']:writer.writerow([safe(row.get(k)) for k in columns])
+        return app.response_class('\ufeff'+buf.getvalue(),mimetype='text/csv',
+            headers={'Content-Disposition':'attachment; filename=indian_stock_scanner.csv'})
 
     @app.get('/api/v1/market-insights/fii-holdings')
     def fii_holdings():
