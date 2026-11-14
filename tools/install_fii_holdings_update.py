@@ -18,7 +18,8 @@ def install(source, target):
     # Copy the complete Python module set, so partial older installs gain all
     # dependencies. Unrelated local-only files are retained.
     files=sorted((source/'insights').rglob('*.py'))
-    files+=[source/'web'/'src'/'main.js',source/'web'/'src'/'styles.css']
+    files.append(source/'tools'/'install_fii_holdings_update.py')
+    files+=sorted(p for p in (source/'web'/'src').rglob('*') if p.suffix in ('.js','.css'))
     plan=[(p,p.relative_to(source),target/p.relative_to(source)) for p in files]
     backup=target/'update_backups'/('fii-holdings-'+datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
     backup.mkdir(parents=True,exist_ok=False)

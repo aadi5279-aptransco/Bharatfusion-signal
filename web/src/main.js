@@ -2,10 +2,11 @@ import React, {useEffect,useMemo,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {createChart, CandlestickSeries, HistogramSeries} from 'lightweight-charts';
 import './styles.css';
+import ScannerPanel from './scanner.js';
 const e=React.createElement;
 const RISK='Rule-based analytics, not investment advice. Entries and targets are not guaranteed. Trading carries risk of loss. No orders are placed.';
-const tabs=[['Dashboard','▦'],['Analyse','⌕'],['Pre-Market 8 AM','☼'],['Intraday','↗'],['BTST','◷'],['FII Stock Deals','⇄'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
-const route={'Dashboard':'dashboard','Analyse':'analyse','Pre-Market 8 AM':'pre-market','Intraday':'intraday','BTST':'btst','FII Stock Deals':'fii-stock-deals','Index Options':'index-options','F&O Stocks':'fo-stocks','Swing Trades':'swing-trades','Multibagger':'multibagger','Track Record':'track-record'};
+const tabs=[['Dashboard','▦'],['Scanner','▤'],['Analyse','⌕'],['Pre-Market 8 AM','☼'],['Intraday','↗'],['BTST','◷'],['FII Stock Deals','⇄'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
+const route={'Scanner':'scanner','Dashboard':'dashboard','Analyse':'analyse','Pre-Market 8 AM':'pre-market','Intraday':'intraday','BTST':'btst','FII Stock Deals':'fii-stock-deals','Index Options':'index-options','F&O Stocks':'fo-stocks','Swing Trades':'swing-trades','Multibagger':'multibagger','Track Record':'track-record'};
 async function api(url,options={}){const res=await fetch(url,{...options,headers:{Accept:'application/json',...(options.headers||{})},cache:'no-store'});const body=await res.json();if(!res.ok)throw Error(body.error||`HTTP ${res.status}`);return body;}
 function Text({children,muted=false}){return e('span',{className:muted?'muted':''},children);}
 function Badge({children,type=''}){return e('span',{className:`badge ${type}`},children);}
@@ -915,7 +916,7 @@ function App(){
  const [refreshBusy,setRefreshBusy]=useState(false);const [refreshError,setRefreshError]=useState('');
  useEffect(()=>{document.documentElement.dataset.theme=theme;localStorage.setItem('bharat-theme',theme);},[theme]);
  useEffect(()=>{let alive=true;const load=async()=>{try{const h=await api('/api/v1/health');if(alive)setHealth(h);}catch{if(alive)setHealth({status:'OFFLINE',read_only:true});}};load();const id=setInterval(load,15000);return()=>{alive=false;clearInterval(id);};},[]);
- useEffect(()=>{if(active==='Analyse')return;let alive=true;const load=async()=>{try{const d=await api('/api/v1/market-insights/'+route[active]);if(alive){setData(d);setError('');}}catch(ex){if(alive)setError(ex.message);}};load();const id=setInterval(load,20000);return()=>{alive=false;clearInterval(id);};},[active]);
+ useEffect(()=>{if(active==='Analyse'||active==='Scanner')return;let alive=true;const load=async()=>{try{const d=await api('/api/v1/market-insights/'+route[active]);if(alive){setData(d);setError('');}}catch(ex){if(alive)setError(ex.message);}};load();const id=setInterval(load,20000);return()=>{alive=false;clearInterval(id);};},[active]);
  const onRefresh=async()=>{
   if(refreshBusy)return;
   setRefreshBusy(true);setRefreshError('');
@@ -959,6 +960,7 @@ function App(){
     error?e(Notice,{warning:true},error):null,
     active==='Dashboard'?e(Dashboard,{data,onRefresh,refreshBusy,refreshState:health.manual_refresh,refreshError}):null,
     active==='Analyse'?e(Analyse,{data,onSearch,busy}):null,
+    active==='Scanner'?e(ScannerPanel,{onAnalyse:symbol=>{select('Analyse');onSearch(symbol);}}):null,
     active==='Pre-Market 8 AM'?e(PremarketWatch,{data}):null,
     active==='FII Stock Deals'?e(FIIStockDealsPanel):null,
     active==='Swing Trades'?e(SwingTrades,{data}):null,
