@@ -4,7 +4,7 @@ Dhan tokens can only be renewed automatically while active and eligible
 (Web-generated tokens). A failed renewal explicitly requires reauthentication.
 """
 from __future__ import annotations
-import base64,json,os,threading,time
+import base64,json,os,threading,time,math
 from datetime import datetime,timedelta
 from datetime import timezone
 import pandas as pd
@@ -352,7 +352,8 @@ class DhanReadOnly:
         if not segment:return None
         return dict(id=str(row.SECURITY_ID),segment=segment,
                     instrument='FUTIDX',expiry=row.exp.date().isoformat(),
-                    symbol=str(row.get('SYMBOL_NAME','INDEX-FUTIDX')))
+                    symbol=str(row.get('SYMBOL_NAME','INDEX-FUTIDX')),
+                    tick_size=(float(row['TICK_SIZE']) if str(row.get('TICK_SIZE','')).replace('.','',1).isdigit() and math.isfinite(float(row['TICK_SIZE'])) and float(row['TICK_SIZE'])>0 else None))
 
     def longterm_instruments(self):
         """NSE/BSE listed cash equities from the existing official Dhan master.
@@ -390,3 +391,4 @@ class DhanReadOnly:
         # Official Dhan-hosted detailed master via pre-existing source parser.
         from data import universe
         return universe(reuse=True)
+
