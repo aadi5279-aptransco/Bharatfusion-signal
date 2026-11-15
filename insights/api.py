@@ -19,12 +19,42 @@ def create_app(service=None):
         # Only the CSV import needs a larger body than existing endpoints.
         if request.path not in ('/api/v1/market-insights/qglp/import','/api/v1/market-insights/fii-holdings/import','/api/v1/market-insights/scanner/metadata') and (request.content_length or 0)>16384:
             return jsonify(error='Request too large'),413
-        if request.method=='POST' and request.path.startswith(('/api/v1/market-insights/qglp/','/api/v1/market-insights/fii-holdings/','/api/v1/market-insights/scanner/','/api/v1/market-insights/positional/')):
+        if request.method=='POST' and request.path.startswith(('/api/v1/market-insights/notifications/', '/api/v1/market-insights/events/','/api/v1/market-insights/qglp/','/api/v1/market-insights/fii-holdings/','/api/v1/market-insights/scanner/','/api/v1/market-insights/positional/')):
             if request.remote_addr not in ('127.0.0.1','::1'):
                 return jsonify(error='Local requests only'),403
             origin=request.headers.get('Origin')
             if origin and origin!=request.host_url.rstrip('/'):
                 return jsonify(error='Same-origin requests only'),403
+
+    @app.get('/api/v1/market-insights/event-calendar')
+    def event_calendar():return jsonify(service.event_center.snapshot())
+
+    @app.get('/api/v1/market-insights/notifications')
+    def notifications():return jsonify(service.event_center.notifications())
+
+    @app.post('/api/v1/market-insights/notifications/read')
+    def notifications_read():
+        body=request.get_json(silent=True) or {};through=body.get('through') if isinstance(body,dict) else None
+        if type(through) is not int or not 0<=through<=9223372036854775807:return jsonify(error='Invalid notification identifier'),400
+        try:service.event_center.mark_read(through)
+        except Exception:return jsonify(error='Could not mark notifications read'),503
+        return jsonify(status='OK')
+
+    @app.post('/api/v1/market-insights/events/add')
+    def events_add():
+        body=request.get_json(silent=True)
+        if not isinstance(body,dict):return jsonify(error='Expected event details'),400
+        try:return jsonify(service.event_center.add_event(body))
+        except ValueError as exc:return jsonify(error=str(exc)),400
+        except Exception:return jsonify(error='Could not save event'),503
+
+    @app.post('/api/v1/market-insights/events/remove')
+    def events_remove():
+        body=request.get_json(silent=True) or {}
+        if not isinstance(body,dict) or not isinstance(body.get('id'),str):return jsonify(error='Event ID required'),400
+        try:service.event_center.remove_event(body['id'])
+        except Exception:return jsonify(error='Could not remove event'),503
+        return jsonify(status='OK')
 
     @app.get('/api/v1/market-insights/qglp')
     def qglp():return jsonify(service.qglp_research.snapshot())
