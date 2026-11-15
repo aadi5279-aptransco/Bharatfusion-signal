@@ -14,6 +14,7 @@ from insights.stock_scanner import StockScanner
 from insights.positional import PositionalScanner
 from insights.orderflow import IndexOrderFlow
 from insights.europe_markets import EuropeMarkets
+from insights.qglp import QGLPResearch
 from insights.liquidity_shortlist import LiquidityShortlist, key as liquidity_key
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
@@ -80,6 +81,7 @@ class InsightsService:
             pass
         self.stock_scanner=StockScanner(self.broker,self.root,_holiday_set,self._job_lock)
         self.positional_scanner=PositionalScanner(self.broker,self.root,_holiday_set,self._job_lock)
+        self.qglp_research=QGLPResearch(self.root)
         self.europe_markets=EuropeMarkets()
         self.index_orderflow=IndexOrderFlow(self.broker,self.root,_holiday_set,self._job_lock)
         self.liquidity=LiquidityShortlist(self.broker,self.root)

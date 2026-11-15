@@ -6,6 +6,7 @@ import ScannerPanel from './scanner.js';
 import PositionalPanel from './positional.js';
 import IndexOrderFlowPanel from './index_orderflow.js';
 import EuropeMarketsPanel from './europe_markets.js';
+import QGLPPanel from './qglp.js';
 const e=React.createElement;
 const RISK='Rule-based analytics, not investment advice. Entries and targets are not guaranteed. Trading carries risk of loss. No orders are placed.';
 const tabs=[['Dashboard','▦'],['Scanner','▤'],['Positional','◈'],['Analyse','⌕'],['Pre-Market 8 AM','☼'],['Intraday','↗'],['BTST','◷'],['FII Stock Deals','⇄'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
@@ -977,7 +978,7 @@ function App(){
     active==='Pre-Market 8 AM'?e(PremarketWatch,{data}):null,
     active==='FII Stock Deals'?e(FIIStockDealsPanel):null,
     active==='Swing Trades'?e(SwingTrades,{data}):null,
-    active==='Multibagger'?e(MultibaggerResearch,{data}):null,
+    active==='Multibagger'?e(React.Fragment,null,e(QGLPPanel),e(MultibaggerResearch,{data})):null,
     ['Intraday','BTST','Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
      e(ReadinessPanel),
      active==='BTST'?e(BTSTClosingStrength):null,

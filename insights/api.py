@@ -17,14 +17,33 @@ def create_app(service=None):
     @app.before_request
     def limit_requests():
         # Only the CSV import needs a larger body than existing endpoints.
-        if request.path not in ('/api/v1/market-insights/fii-holdings/import','/api/v1/market-insights/scanner/metadata') and (request.content_length or 0)>16384:
+        if request.path not in ('/api/v1/market-insights/qglp/import','/api/v1/market-insights/fii-holdings/import','/api/v1/market-insights/scanner/metadata') and (request.content_length or 0)>16384:
             return jsonify(error='Request too large'),413
-        if request.method=='POST' and request.path.startswith(('/api/v1/market-insights/fii-holdings/','/api/v1/market-insights/scanner/','/api/v1/market-insights/positional/')):
+        if request.method=='POST' and request.path.startswith(('/api/v1/market-insights/qglp/','/api/v1/market-insights/fii-holdings/','/api/v1/market-insights/scanner/','/api/v1/market-insights/positional/')):
             if request.remote_addr not in ('127.0.0.1','::1'):
                 return jsonify(error='Local requests only'),403
             origin=request.headers.get('Origin')
             if origin and origin!=request.host_url.rstrip('/'):
                 return jsonify(error='Same-origin requests only'),403
+
+    @app.get('/api/v1/market-insights/qglp')
+    def qglp():return jsonify(service.qglp_research.snapshot())
+
+    @app.get('/api/v1/market-insights/qglp/template')
+    def qglp_template():
+        from insights.qglp import COLUMNS
+        buf=io.StringIO();csv.writer(buf).writerow(COLUMNS.keys())
+        return app.response_class(buf.getvalue(),mimetype='text/csv',headers={'Content-Disposition':'attachment; filename=qglp_template.csv'})
+
+    @app.post('/api/v1/market-insights/qglp/import')
+    def qglp_import():
+        upload=request.files.get('file')
+        if upload is None:return jsonify(error='Choose a UTF-8 CSV file'),400
+        try:
+            result=service.qglp_research.import_csv(upload.stream.read(2_000_001),request.form.get('asof'),request.form.get('period_end'),request.form.get('source',''))
+            return jsonify(result)
+        except (ValueError,UnicodeError,csv.Error) as exc:return jsonify(error=str(exc)),400
+        except OSError:return jsonify(error='Could not save QGLP import; previous data retained'),500
 
     @app.get('/api/v1/market-insights/europe-markets')
     def europe_markets():return jsonify(service.europe_markets.snapshot())
