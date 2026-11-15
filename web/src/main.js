@@ -7,10 +7,11 @@ import PositionalPanel from './positional.js';
 import IndexOrderFlowPanel from './index_orderflow.js';
 import EuropeMarketsPanel from './europe_markets.js';
 import QGLPPanel from './qglp.js';
+import {EventCalendar,NotificationCenter} from './event_center.js';
 const e=React.createElement;
 const RISK='Rule-based analytics, not investment advice. Entries and targets are not guaranteed. Trading carries risk of loss. No orders are placed.';
-const tabs=[['Dashboard','▦'],['Scanner','▤'],['Positional','◈'],['Analyse','⌕'],['Pre-Market 8 AM','☼'],['Intraday','↗'],['BTST','◷'],['FII Stock Deals','⇄'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
-const route={'Scanner':'scanner','Positional':'positional','Dashboard':'dashboard','Analyse':'analyse','Pre-Market 8 AM':'pre-market','Intraday':'intraday','BTST':'btst','FII Stock Deals':'fii-stock-deals','Index Options':'index-options','F&O Stocks':'fo-stocks','Swing Trades':'swing-trades','Multibagger':'multibagger','Track Record':'track-record'};
+const tabs=[['Event Calendar','▣'],['Dashboard','▦'],['Scanner','▤'],['Positional','◈'],['Analyse','⌕'],['Pre-Market 8 AM','☼'],['Intraday','↗'],['BTST','◷'],['FII Stock Deals','⇄'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
+const route={'Event Calendar':'event-calendar','Scanner':'scanner','Positional':'positional','Dashboard':'dashboard','Analyse':'analyse','Pre-Market 8 AM':'pre-market','Intraday':'intraday','BTST':'btst','FII Stock Deals':'fii-stock-deals','Index Options':'index-options','F&O Stocks':'fo-stocks','Swing Trades':'swing-trades','Multibagger':'multibagger','Track Record':'track-record'};
 async function api(url,options={}){const res=await fetch(url,{...options,headers:{Accept:'application/json',...(options.headers||{})},cache:'no-store'});const body=await res.json();if(!res.ok)throw Error(body.error||`HTTP ${res.status}`);return body;}
 function Text({children,muted=false}){return e('span',{className:muted?'muted':''},children);}
 function Badge({children,type=''}){return e('span',{className:`badge ${type}`},children);}
@@ -961,7 +962,8 @@ function App(){
   e('div',{className:'workspace'},
    e('header',{className:'topbar'},e('div',null,e('small',{className:'muted'},'BHARATSIGNAL / MARKET INSIGHTS'),e('h1',null,active)),
     e('div',{className:'top-actions'},e(Badge,{type:'positive'},'NO ORDER PLACEMENT'),e(Badge,null,'DHAN · '+health.status),e('button',{className:'theme-btn',onClick:()=>setTheme(theme==='dark'?'light':'dark')},theme==='dark'?'☀ Light':'☾ Dark'))),
-   e('main',{className:'content'},e(Notice,{warning:true},RISK),
+   e('main',{className:'content'},e(NotificationCenter,{onOpen:select}),e(Notice,{warning:true},RISK),
+    active==='Event Calendar'?e(EventCalendar,{data,onRefresh:async()=>{try{setData(await api('/api/v1/market-insights/event-calendar'))}catch(ex){setError(ex.message)}}}):null,
     error?e(Notice,{warning:true},error):null,
     ['Intraday','F&O Stocks','Swing Trades'].includes(active)?e(Section,{title:'Scheduled liquidity shortlist'},
      e('p',null,'Broad discovery: 09:45, 10:00, 11:00, 12:00, 13:00, 14:00, 15:00 IST. Strategy checks: every 5 minutes on stored selections only.'),

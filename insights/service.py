@@ -15,6 +15,7 @@ from insights.positional import PositionalScanner
 from insights.orderflow import IndexOrderFlow
 from insights.europe_markets import EuropeMarkets
 from insights.qglp import QGLPResearch
+from insights.event_center import EventCenter
 from insights.liquidity_shortlist import LiquidityShortlist, key as liquidity_key
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
@@ -85,6 +86,7 @@ class InsightsService:
         self.europe_markets=EuropeMarkets()
         self.index_orderflow=IndexOrderFlow(self.broker,self.root,_holiday_set,self._job_lock)
         self.liquidity=LiquidityShortlist(self.broker,self.root)
+        self.event_center=EventCenter(self.root,self)
         self._done=set();self._thread=None;self._stop=threading.Event()
         self._shortlist_date=None
         self._shortlist_finalized=False
@@ -758,9 +760,13 @@ class InsightsService:
     def analyse(self,symbol,now=None,expiry=None):
         from insights import analyse_workflow
         now=now or datetime.now(IST)
-        return dict(analyse_workflow.analyse(
+        result=dict(analyse_workflow.analyse(
             self,symbol,now,expiry,_holiday_set(),_norm),
             disclaimer=DISCLAIMER)
+        plan=result.get('entry_plan')
+        if isinstance(plan,dict) and plan.get('entry'):
+            self._update('analyse-notification',dict(signals=[dict(plan,symbol=result.get('symbol',symbol),strategy='Analyse conditional scenario',reasons=result.get('reasons',[]),status='CONDITIONAL UNDERLYING RESEARCH')]),now)
+        return result
 
     def scan_premarket(self,now):
         """One 08:00 IST previous-session stock watchlist, never trade signals.
@@ -1429,6 +1435,7 @@ class InsightsService:
         self.positional_scanner.start()
         self.index_orderflow.start()
         self.europe_markets.start()
+        self.event_center.start()
         def loop():
             while not self._stop.is_set():
                 # Official participant CSV download is independent from
@@ -1451,4 +1458,5 @@ class InsightsService:
         self.positional_scanner.stop()
         self.index_orderflow.stop()
         self.europe_markets.stop()
+        self.event_center.stop()
 
