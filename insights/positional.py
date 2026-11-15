@@ -1,14 +1,16 @@
 """Auditable positional research and a non-overlapping five-minute worker."""
 from __future__ import annotations
-import math, threading, time
+import math, os, threading, time
 from datetime import datetime, timedelta
 from pathlib import Path
 import pandas as pd
 from insights.config import IST, is_market_session, WATCHLIST, MAX_SYMBOLS
 from insights.indicators import clean_bars
 from insights.stock_scanner import session_date, StockScanner
+from insights.strategies.ema9_trendline import EMA9Scanner, NAME as EMA9_NAME, price_path_complete
 
 SOURCES=[
+ {'name':'Uploaded EMA9 Trendline Breakout specification','url':None,'strategies':'EMA9 + confirmed descending trendline + prior-volume breakout (1H/1D/1W/1M)'},
  {'name':'Uploaded Trading Strategies PDF','url':None,'strategies':'Morning Star; Supertrend + RSI; intraday R1/S1'},
  {'name':'StockCharts Price Channels','url':'https://chartschool.stockcharts.com/table-of-contents/technical-indicators-and-overlays/technical-overlays/price-channels','strategies':'Donchian breakout (adapted)'},
  {'name':'StockCharts Moving Momentum','url':'https://chartschool.stockcharts.com/table-of-contents/trading-strategies-and-models/trading-strategies/moving-momentum','strategies':'Moving Momentum (adapted)'}]
@@ -114,7 +116,7 @@ def assess(row,five,now,holidays):
     if not is_market_session(now,holidays):r['status']='CLOSED — REVIEW NEXT SESSION';return r
     if stamp.date()!=now.date() or (pd.Timestamp(now)-stamp).total_seconds()>600:r['status']='STALE PRICE';return r
     signal=pd.Timestamp(r['signal_at'])
-    since=five[five.index>=signal+pd.Timedelta(days=1)] if r['timeframe']=='Daily' else five[five.index>=signal+pd.Timedelta(minutes=15)]
+    since=five[five.index>=pd.Timestamp(r['signal_end'])] if r.get('signal_end') else five[five.index>=signal+pd.Timedelta(days=1)] if r['timeframe']=='Daily' else five[five.index>=signal+pd.Timedelta(minutes=15)]
     if since.empty:r['status']='WAITING FOR NEXT SESSION' if r['timeframe']=='Daily' else 'WAITING FOR NEXT BAR';return r
     today=five[five.index.date==now.date()]
     expected_index=pd.date_range(pd.Timestamp(now).normalize()+pd.Timedelta(hours=9,minutes=15),today.index[-1],freq='5min')
@@ -128,7 +130,7 @@ def assess(row,five,now,holidays):
         r['status']='T1 ALREADY TOUCHED';return r
     distance=sign*(float(last.close)/r['entry']-1)
     r['status']='READY — REVIEW ENTRY' if 0<=distance<=.01 else 'EXTENDED — DO NOT CHASE' if distance>.01 else 'WAITING FOR ENTRY'
-    if r['timeframe']!='Daily' and (now.hour,now.minute)>(14,30):r['status']='ENTRY WINDOW CLOSED'
+    if 'INTRADAY' in r['timeframe'] and (now.hour,now.minute)>(14,30):r['status']='ENTRY WINDOW CLOSED'
     return r
 
 def carry_daily(signals,previous,daily,item):
@@ -192,6 +194,7 @@ class PositionalScanner:
         self.limit=max(1,min(200,limit or MAX_SYMBOLS));self.watchlist=WATCHLIST if watchlist is None else watchlist
         self.store=StockScanner(broker,Path(root)/'positional',holidays,job_lock)
         self._lock=threading.RLock();self._stop=threading.Event();self._thread=None;self._worker=None
+        self.ema9=EMA9Scanner(broker,self._call,adjusted=os.getenv('INSIGHTS_EMA9_ADJUSTED_DATA_CONFIRMED','false').lower()=='true')
         self._state={'status':'WAITING FOR START'};self._last_slot=None;self._daily={};self._deadline=0
     def snapshot(self,now=None):
         now=now or datetime.now(IST);saved=self.store._read('positional',{'rows':[],'coverage':{}})
@@ -203,7 +206,7 @@ class PositionalScanner:
         for r in saved['rows']:
             if saved['stale']:r['status']='STALE SCAN — DO NOT USE'
             elif not is_market_session(now,self.holidays()) and r['status'].startswith(('READY','WAITING','EXTENDED')):r['status']='CLOSED — REVIEW NEXT SESSION'
-            elif r['timeframe']!='Daily' and (now.hour,now.minute)>(14,30) and r['status'].startswith('READY'):r['status']='ENTRY WINDOW CLOSED'
+            elif 'INTRADAY' in r['timeframe'] and (now.hour,now.minute)>(14,30) and r['status'].startswith('READY'):r['status']='ENTRY WINDOW CLOSED'
         return saved
     def _call(self,fn):
         while not self._stop.is_set() and time.monotonic()<self._deadline:
@@ -221,7 +224,7 @@ class PositionalScanner:
         return {'status':'STARTED'}
     def _run(self,now):
         self._deadline=time.monotonic()+240
-        rows=[];errors=[];done=0;eligible=0
+        rows=[];errors=[];done=0;eligible=0;ema9_checks=[]
         previous=self.store._read('positional',{'rows':[]})['rows']
         try:
             holidays=self.holidays()
@@ -246,9 +249,14 @@ class PositionalScanner:
                     if is_market_session(now,holidays):
                         try:five=completed_five(self._call(lambda:self.broker.history(item,now,minutes=5,lookback_days=10)),now)
                         except (ValueError,RuntimeError,OSError) as exc:errors.append({'symbol':item['symbol'],'error':'5m price unavailable: '+str(exc)[:140]})
-                    candidates=carry_daily(signals,previous,d,item)+r1_setups(d,five,item,now,holidays)
+                    ema_rows,checks=self.ema9.scan(item,now,holidays);ema9_checks.extend(checks)
+                    candidates=carry_daily(signals,previous,d,item)+r1_setups(d,five,item,now,holidays)+ema_rows
                     for r in candidates:
                         result=assess(r,five,now,holidays)
+                        if r['strategy']==EMA9_NAME:
+                            # Multi-period signals may predate the available 5m window; do not assert full-path entry safety.
+                            if not self.ema9.adjusted:result['status']='RESEARCH ONLY — VERIFY ADJUSTMENTS'
+                            elif not price_path_complete(r,five,now,holidays):result['status']='WATCH — VERIFY POST-SIGNAL PRICE PATH'
                         if r.get('tracking_status') and result['status'] in ('READY — REVIEW ENTRY','WAITING FOR ENTRY','EXTENDED — DO NOT CHASE','WAITING FOR PRICE','CLOSED — REVIEW NEXT SESSION'):
                             result['status']=r['tracking_status']
                         rows.append(result)
@@ -261,10 +269,10 @@ class PositionalScanner:
                 if consecutive>=3:break
                 if self._stop.wait(.2):break
             coverage=dict(mapped=available,selected=len(items),scanned=done,eligible=eligible,errors=errors,
-                omitted=max(0,available-len(items)),universe='Existing mapped cash-stock universe / INSIGHTS_WATCHLIST')
+                ema9_checks=ema9_checks,omitted=max(0,available-len(items)),universe='Existing mapped cash-stock universe / INSIGHTS_WATCHLIST')
             # Publish only this cycle's evaluated rows, never mix old ready rows with new prices.
             self.store._write('positional',dict(rows=rows,coverage=coverage,updated_at=datetime.now(IST).isoformat(),analysis_at=now.isoformat()))
-            with self._lock:self._state.update(status='COMPLETE' if done==len(items) and not errors else 'PARTIAL — CHECK COVERAGE',coverage=coverage)
+            with self._lock:self._state.update(status='COMPLETE' if done==len(items) and not errors and all(c['status']=='CHECKED' for c in ema9_checks) else 'PARTIAL — CHECK COVERAGE',coverage=coverage)
         except Exception as exc:
             # Cached signals remain inspectable, but are explicitly invalidated on a failed refresh.
             with self._lock:self._state.update(status='FAILED',error=str(exc)[:200])
