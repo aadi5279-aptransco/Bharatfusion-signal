@@ -1,92 +1,41 @@
-"""Scheduler boundaries: only 09:45 and 10:00 broad discovery, then cached shortlist monitoring."""
-import tempfile
-import unittest
+"""Scheduled broad liquidity discovery and five-minute shortlist monitoring."""
+import tempfile,unittest
 from datetime import datetime
 from unittest.mock import Mock,patch
 from insights.service import InsightsService
 from insights.config import IST
-
-
-class MinimalBroker:
-    def configured(self):return True
-
+from insights.tests.test_liquidity_shortlist import Broker
 
 class SchedulingTests(unittest.TestCase):
-    def test_preliminary_final_monitor_are_separate_and_non_overlapping(self):
-        with tempfile.TemporaryDirectory() as folder:
-            service=InsightsService(MinimalBroker(),folder)
-            service.dashboard=Mock(return_value={})
-            service.discover_shortlist=Mock(return_value={})
-            service.scan_intraday=Mock(return_value={})
-            service.scan_index_options=Mock(return_value={})
-            service.scan_fo=Mock(return_value={})
-            service.scan_btst=Mock(return_value={})
-            service.reconcile_outcomes=Mock(return_value=0)
-            at=lambda h,m:datetime(2026,11,12,h,m,tzinfo=IST)
+    def prepare(self,root):
+        b=Broker();s=InsightsService(b,root);s.liquidity.pause=0
+        for name in ('dashboard','scan_intraday','scan_fo','scan_swing_shortlist','scan_index_options','scan_btst','scan_btst_closing','reconcile_outcomes'):setattr(s,name,Mock(return_value={}))
+        return s,b
+    def test_all_refresh_slots_and_only_shortlist_checks_between(self):
+        with tempfile.TemporaryDirectory() as root:
+            s,b=self.prepare(root);at=lambda h,m:datetime(2026,11,12,h,m,tzinfo=IST)
             with patch('insights.service._holiday_set',return_value=set()):
-                self.assertEqual(service.run_due(at(9,40))['status'],'OK')
-                self.assertEqual(service.discover_shortlist.call_count,0)
-                self.assertEqual(service.scan_index_options.call_count,1)
-                self.assertEqual(service.scan_fo.call_count,1)
-                # Calling a scheduler twice in the same 5-minute bucket
-                # cannot issue an additional option-chain/history scan.
-                self.assertEqual(service.run_due(at(9,40))['status'],'OK')
-                self.assertEqual(service.scan_index_options.call_count,1)
-                self.assertEqual(service.scan_fo.call_count,1)
-                self.assertEqual(service.run_due(at(9,45))['status'],'OK')
-                self.assertEqual(service.discover_shortlist.call_count,1)
-                self.assertEqual(service.scan_index_options.call_count,2)
-                self.assertEqual(service.scan_fo.call_count,2)
-                service.run_due(at(10,0))
-                self.assertEqual(service.discover_shortlist.call_count,2)
-                self.assertEqual(service.scan_index_options.call_count,3)
-                self.assertEqual(service.scan_fo.call_count,3)
-                service.run_due(at(10,5))
-                self.assertEqual(service.scan_intraday.call_count,1)
-                self.assertEqual(service.scan_index_options.call_count,4)
-                self.assertEqual(service.scan_fo.call_count,4)
-                service.run_due(at(10,10))
-                self.assertEqual(service.scan_intraday.call_count,2)
-                self.assertEqual(service.scan_index_options.call_count,5)
-                self.assertEqual(service.scan_fo.call_count,5)
-                service.run_due(at(10,11))
-                self.assertEqual(service.scan_intraday.call_count,2)
-                self.assertEqual(service.scan_index_options.call_count,5)
-                self.assertEqual(service.scan_fo.call_count,5)
-                self.assertEqual(service.discover_shortlist.call_count,2)
-
-    def test_first5_redbar_rechecks_at_0935_without_duplicate_0930(self):
-        with tempfile.TemporaryDirectory() as folder:
-            svc=InsightsService(MinimalBroker(),folder)
-            svc.dashboard=Mock(return_value={})
-            svc.scan_index_options=Mock(return_value={})
-            svc.scan_fo=Mock(return_value={})
-            svc.discover_shortlist=Mock(return_value={})
-            svc.reconcile_outcomes=Mock(return_value=0)
-            at=lambda h,m:datetime(2026,11,12,h,m,tzinfo=IST)
+                s.run_due(at(9,40));self.assertEqual(len(b.calls),0);s.scan_fo.assert_not_called()
+                for count,(h,m) in enumerate(((9,45),(10,0),(11,0),(12,0),(13,0),(14,0),(15,0)),1):
+                    s.run_due(at(h,m));self.assertEqual(len(b.calls),count)
+                    calls=s.scan_intraday.call_count
+                    s.run_due(at(h,m));self.assertEqual(s.scan_intraday.call_count,calls)
+                    s.run_due(at(h,m+5));self.assertEqual(len(b.calls),count)
+                    self.assertEqual(s.scan_intraday.call_count,calls+1)
+                self.assertEqual(s.scan_intraday.call_count,s.scan_fo.call_count)
+                self.assertEqual(s.scan_fo.call_count,s.scan_swing_shortlist.call_count)
+    def test_delayed_tick_and_late_start_do_not_replay_old_slots(self):
+        with tempfile.TemporaryDirectory() as root:
+            s,b=self.prepare(root);at=lambda m:datetime(2026,11,12,12,m,tzinfo=IST)
             with patch('insights.service._holiday_set',return_value=set()):
-                svc.run_due(at(9,30))
-                self.assertEqual(svc.scan_index_options.call_count,1)
-                self.assertEqual(svc.scan_fo.call_count,1)
-                svc.run_due(at(9,35))
-                self.assertEqual(svc.scan_index_options.call_count,2)
-                self.assertEqual(svc.scan_fo.call_count,2)
-                svc.run_due(at(9,36))
-                self.assertEqual(svc.scan_index_options.call_count,2)
-                self.assertEqual(svc.scan_fo.call_count,2)
-
-    def test_holiday_makes_no_broker_calls(self):
-        with tempfile.TemporaryDirectory() as folder:
-            service=InsightsService(MinimalBroker(),folder)
-            service.dashboard=Mock()
-            service.discover_shortlist=Mock()
-            service.scan_intraday=Mock()
+                s.run_due(at(17));self.assertEqual(len(b.calls),1);self.assertEqual(s.scan_intraday.call_count,1)
+                s.run_due(at(18));self.assertEqual(s.scan_intraday.call_count,1)
+                s.run_due(at(21));self.assertEqual(s.scan_intraday.call_count,2);self.assertEqual(len(b.calls),1)
+    def test_holiday_and_overlap_do_not_request_quotes(self):
+        with tempfile.TemporaryDirectory() as root:
+            s,b=self.prepare(root)
             with patch('insights.service._holiday_set',return_value=set()):
-                result=service.run_due(datetime(2026,11,10,10,0,tzinfo=IST))
-            self.assertIn('BLOCKED',result['status'])
-            service.dashboard.assert_not_called()
-            service.discover_shortlist.assert_not_called()
-            service.scan_intraday.assert_not_called()
-
-
-if __name__=='__main__':unittest.main()
+                s.run_due(datetime(2026,11,10,10,0,tzinfo=IST));self.assertFalse(b.calls)
+                s._job_lock.acquire()
+                try:s.run_due(datetime(2026,11,12,10,0,tzinfo=IST));self.assertFalse(b.calls)
+                finally:s._job_lock.release()

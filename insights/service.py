@@ -12,6 +12,7 @@ from insights.fii_stock_deals import FIIStockDeals
 from insights.fii_holdings import FIIHoldings
 from insights.stock_scanner import StockScanner
 from insights.positional import PositionalScanner
+from insights.liquidity_shortlist import LiquidityShortlist, key as liquidity_key
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
 from insights.strategies import equity,options,futures
@@ -77,6 +78,7 @@ class InsightsService:
             pass
         self.stock_scanner=StockScanner(self.broker,self.root,_holiday_set,self._job_lock)
         self.positional_scanner=PositionalScanner(self.broker,self.root,_holiday_set,self._job_lock)
+        self.liquidity=LiquidityShortlist(self.broker,self.root)
         self._done=set();self._thread=None;self._stop=threading.Event()
         self._shortlist_date=None
         self._shortlist_finalized=False
@@ -178,7 +180,9 @@ class InsightsService:
 
     def _update(self,name,payload,now):
         with self._lock:
-            payload=dict(payload);payload['updated_at']=now.isoformat();payload['disclaimer']=DISCLAIMER
+            payload=dict(payload)
+            if name in ('intraday','fo-stocks','swing-trades') and hasattr(self,'liquidity'):payload['liquidity']=self.liquidity.metadata(now)
+            payload['updated_at']=now.isoformat();payload['disclaimer']=DISCLAIMER
             self._snapshots[name]=payload;self._timestamps[name]=now.isoformat()
 
     def snapshot(self,name):
@@ -286,6 +290,21 @@ class InsightsService:
         nifty=next((x for x in indices if _norm(x['symbol']) in ('NIFTY','NIFTY50')),None)
         sec={_norm(x['sector']):x for x in snap.get('sectors',[])}
         return nifty,sec
+
+    def refresh_liquidity(self,now):
+        result=self.liquidity.refresh(now)
+        self._shortlist_date=now.astimezone(IST).date().isoformat()
+        self._shortlist=self.liquidity.selected('intraday',now)
+        self._shortlist_up=[x for x in self._shortlist if x.get('liquidity_change',0)>=0]
+        self._shortlist_down=[x for x in self._shortlist if x.get('liquidity_change',0)<0]
+        self._shortlist_finalized=True
+        self._discovery_mode='SCHEDULED SESSION TURNOVER RANKING'
+        self._discovery_scanned=result.get('universe') or 0
+        self._breadth_quotes=result.get('quoted') or 0
+        return result
+
+    def scan_swing_shortlist(self,now):
+        return self.scan_longterm(now,selected=self.liquidity.selected('swing-trades',now),swing_only=True)
 
     def discover_shortlist(self,now,final=False):
         """One 09:45 preview and 10:00 final broad screen; no repeated universe scans."""
@@ -399,7 +418,7 @@ class InsightsService:
         return data
 
     def scan_intraday(self,now):
-        """Exact cash daily + 15m momentum screen; monitor only 10:00 shortlist.
+        """Exact cash daily + 15m momentum screen on the stored liquidity shortlist.
 
         No SMC/BOS/NIFTY/sector gate is silently added to the user's 11
         specified query conditions. Missing/old data fails closed.
@@ -407,7 +426,7 @@ class InsightsService:
         now=now.astimezone(IST)
         date=now.date().isoformat()
         if self._shortlist_date!=date or not self._shortlist_finalized:
-            data=dict(status='WAITING FOR FINAL 10:00 SHORTLIST',
+            data=dict(status='WAITING FOR 09:45 LIQUIDITY SHORTLIST',
                       signals=[],buy_signals=[],sell_signals=[],
                       preview_buy=list(self._preview_buy) if self._shortlist_date==date else [],
                       preview_sell=list(self._preview_sell) if self._shortlist_date==date else [],
@@ -656,7 +675,7 @@ class InsightsService:
     def scan_btst(self,now):
         _,sectors=self._context();mapping=_sector_map();picks=[];skipped=0
         if self._shortlist_date!=now.date().isoformat() or not self._shortlist_finalized:
-            data=dict(signals=[],status='BTST WAITING FOR LOCKED 10:00 SHORTLIST',
+            data=dict(signals=[],status='BTST WAITING FOR STORED LIQUIDITY SHORTLIST',
                       scanned=0,blocked=0)
             self._update('btst',data,now)
             return data
@@ -970,7 +989,7 @@ class InsightsService:
                     signals.append(cycle_wave.annotate(p,five,now))
                     # Never journal a hypothetical premium price as an observed signal.
             except (ValueError,BrokerUnavailable,KeyError):continue
-        phase='PRELIMINARY 09:45' if (now.hour,now.minute)<(10,0) else 'FINAL 10:00'
+        phase='STORED LIQUIDITY SHORTLIST'
         self._update('index-options',dict(signals=signals,fib_setups=fib_setups,
               opening_setups=opening_setups,opening_ready=sum(x.get('state')=='DIRECTION_READY' for x in opening_setups),
               status=(phase+' — LEGACY OPTION PLANS + SPOT WATCHES' if signals else
@@ -983,31 +1002,8 @@ class InsightsService:
 
     def scan_fo(self,now):
         signals=[];unavailable=0;fib_setups=[];opening_setups=[]
-        selected=(list(self._shortlist) if self._shortlist_date==now.date().isoformat()
-                  else [])
-        # A 10:00 shortlist can be empty from very strict daily/volume
-        # rules. The option watch must not depend entirely on that gate.
-        # Prefer prior-session ranked symbols, then mapped F&O universe.
-        available={_norm(x['symbol']):x for x in self.instruments() if x.get('kind')=='stock'}
-        previous=self.snapshot('pre-market')
-        up=[x for x in self._shortlist_up if x in selected]
-        down=[x for x in self._shortlist_down if x in selected]
-        up.extend(available.get(_norm(row.get('symbol',''))) for row in previous.get('gainers',[]))
-        down.extend(available.get(_norm(row.get('symbol',''))) for row in previous.get('losers',[]))
-        # Balance BUY/SELL watches rather than consuming the first twelve
-        # slots with gainers. Unmapped rows are ignored.
-        balanced=[]
-        for j in range(max(len(up),len(down))):
-            if j<len(up) and up[j] is not None:balanced.append(up[j])
-            if j<len(down) and down[j] is not None:balanced.append(down[j])
-        sources=balanced+[x for x in selected+self._stock_list() if x is not None]
-        picks=[];seen=set()
-        for item in sources:
-            key=(item.get('segment'),str(item.get('id')))
-            if key in seen:continue
-            seen.add(key);picks.append(item)
-            if len(picks)>=12:break
-        # Each pass scans no more than twelve mapped F&O underlyings.
+        selected=self.liquidity.selected('fo-stocks',now)
+        picks=list(selected)
         for item in picks:
             opening_setups.extend(self._opening_setups(item,now))
             fib_setups.extend(self._fib_setups(item,now))
@@ -1049,16 +1045,16 @@ class InsightsService:
                 # No journal record: option entry premiums are not timestamp-verified.
                 signals.append(cycle_wave.annotate(plan,five,now))
             except (BrokerUnavailable,ValueError,KeyError):unavailable+=1
-        phase='PRELIMINARY 09:45' if (now.hour,now.minute)<(10,0) else 'FINAL 10:00'
+        phase='STORED LIQUIDITY SHORTLIST'
         self._update('fo-stocks',dict(signals=signals,fib_setups=fib_setups,
               opening_setups=opening_setups,opening_ready=sum(x.get('state')=='DIRECTION_READY' for x in opening_setups),
               status=(phase+' — LEGACY FUTURES SETUPS + SPOT WATCHES' if signals else
                       phase+' — SPOT CE/PE WATCHES (PREMIUM UNVERIFIED)'
                       if any(x.get('state')=='DIRECTION_READY' for x in opening_setups)
                       else phase+' — NO CONFIRMED SPOT DIRECTION YET'),
-              phase=phase,scanned=len(picks),shortlisted=len(selected),
+              phase=phase,scanned=len(picks),shortlisted=len(selected),shortlist_symbols=[x['symbol'] for x in selected],
               unavailable_count=unavailable,qualified=len(signals),mtf='15m+60m+Futures OI',
-              note='Opening 5m/redbar watches monitor a bounded F&O sample even if the strict shortlist is empty; old futures/MTF trade candidates stay separate. Premium and quote age unverified.'),now)
+              note='Only stored liquid F&O underlyings are monitored; no full-universe fallback. Premium and quote age unverified.'),now)
         return signals
 
     def reconcile_outcomes(self,now):
@@ -1102,41 +1098,47 @@ class InsightsService:
         except (OSError,ValueError,TypeError):
             return None
 
-    def scan_longterm(self,now):
-        """Daily off-hours research scan, never a 5-minute intraday job.
+    def scan_longterm(self,now,selected=None,swing_only=False,swing_keys=None):
+        """Swing-only shortlist checks, or the separate after-close research batch.
 
-        Separate from the 10:00 locked shortlist. Includes configured F&O
-        universe, and if a watchlist is provided, respects its explicit limit.
+        Passing selected avoids broad discovery; swing_only preserves the
+        Multibagger snapshot. Daily/weekly candle eligibility is unchanged.
         """
         now=now.astimezone(IST)
-        all_stocks=(self.broker.longterm_instruments()
-                    if hasattr(self.broker,'longterm_instruments')
-                    else [x for x in self.instruments() if x.get('kind')=='stock'])
-        if WATCHLIST:
-            selected={_norm(v) for v in WATCHLIST}
-            all_stocks=[x for x in all_stocks if
-                _norm(x['symbol']) in selected or _norm(x.get('ticker','')) in selected]
-        # Separate limit from intraday's 30-stock deep analysis cap.
-        # The available master may be only the F&O subset. Do not claim
-        # comprehensive NSE/BSE coverage unless master supports that.
-        try:maximum=max(1,min(500,int(os.getenv('INSIGHTS_LONGTERM_MAX_SYMBOLS','80'))))
-        except (ValueError,TypeError):maximum=80
-        fundamentals=self._dated_research_bundle('INSIGHTS_FUNDAMENTALS_FILE')
-        funding_names=({_norm(k) for k in (fundamentals.get('symbols') or {})}
-                       if isinstance(fundamentals,dict) else set())
-        priority=lambda item:(
-            _norm(item['symbol']) not in funding_names,
-            _norm(item['symbol']),str(item['id']))
-        nse=sorted((x for x in all_stocks if x.get('segment')=='NSE_EQ'),key=priority)
-        bse=sorted((x for x in all_stocks if x.get('segment')=='BSE_EQ'),key=priority)
-        if nse and bse and not WATCHLIST:
-            nse_quota=max(1,round(maximum*.7))
-            bse_quota=maximum-nse_quota
-            selected=nse[:nse_quota]+bse[:bse_quota]
-            extra=[x for x in nse[nse_quota:]+bse[bse_quota:] if x not in selected]
-            universe=(selected+extra)[:maximum]
+        if selected is None:
+            all_stocks=(self.broker.longterm_instruments()
+                        if hasattr(self.broker,'longterm_instruments')
+                        else [x for x in self.instruments() if x.get('kind')=='stock'])
+            if WATCHLIST:
+                selected={_norm(v) for v in WATCHLIST}
+                all_stocks=[x for x in all_stocks if
+                    _norm(x['symbol']) in selected or _norm(x.get('ticker','')) in selected]
+            # Separate limit from intraday's 30-stock deep analysis cap.
+            # The available master may be only the F&O subset. Do not claim
+            # comprehensive NSE/BSE coverage unless master supports that.
+            try:maximum=max(1,min(500,int(os.getenv('INSIGHTS_LONGTERM_MAX_SYMBOLS','80'))))
+            except (ValueError,TypeError):maximum=80
+            fundamentals=self._dated_research_bundle('INSIGHTS_FUNDAMENTALS_FILE')
+            funding_names=({_norm(k) for k in (fundamentals.get('symbols') or {})}
+                           if isinstance(fundamentals,dict) else set())
+            priority=lambda item:(
+                _norm(item['symbol']) not in funding_names,
+                _norm(item['symbol']),str(item['id']))
+            nse=sorted((x for x in all_stocks if x.get('segment')=='NSE_EQ'),key=priority)
+            bse=sorted((x for x in all_stocks if x.get('segment')=='BSE_EQ'),key=priority)
+            if nse and bse and not WATCHLIST:
+                nse_quota=max(1,round(maximum*.7))
+                bse_quota=maximum-nse_quota
+                selected=nse[:nse_quota]+bse[:bse_quota]
+                extra=[x for x in nse[nse_quota:]+bse[bse_quota:] if x not in selected]
+                universe=(selected+extra)[:maximum]
+            else:
+                universe=sorted(all_stocks,key=priority)[:maximum]
         else:
-            universe=sorted(all_stocks,key=priority)[:maximum]
+            all_stocks=list(selected);universe=list(selected)
+            fundamentals=self._dated_research_bundle('INSIGHTS_FUNDAMENTALS_FILE')
+        if swing_keys is not None:
+            universe=list({liquidity_key(x):x for x in universe+self.liquidity.selected('swing-trades',now)}.values())
         surveillance=self._dated_research_bundle('INSIGHTS_SURVEILLANCE_FILE')
         # NIFTY 500 relative strength ranks must be independently sourced.
         rank_source=self._dated_research_bundle('INSIGHTS_RS_RANK_FILE')
@@ -1181,38 +1183,40 @@ class InsightsService:
                     continue
                 # Independent daily/weekly evidence; do not change existing
                 # daily swing signal eligibility, entry, stop or 2R/3R.
-                swing_matches=swing.scan(daily,item['symbol'],now)
-                opportunity=swing_opportunities.evaluate(daily,item['symbol'],now)
-                guide=swing_guide.evaluate(daily,item['symbol'],now,benchmark=benchmark)
-                if guide.get('matched_setups'):
-                    guide_rows.append(guide)
-                include_opportunity=(opportunity['status']!='UNAVAILABLE' and
-                    opportunity['setup']!='NO BULLISH SETUP')
-                if swing_matches or include_opportunity:
-                    gann_layer=swing_gann_wave.assess(daily,now)
-                    for candidate in swing_matches:
-                        enriched=dict(candidate)
-                        enriched['swing_gann_wave']=gann_layer
-                        enriched['gann_wave_alignment']=gann_layer['alignment']
-                        swing_rows.append(enriched)
-                    if include_opportunity:
-                        opportunity['swing_gann_wave']=gann_layer
-                        opportunity['gann_wave_alignment']=gann_layer.get('alignment','UNAVAILABLE')
-                        fno_root=str((item.get('future') or {}).get('symbol','')).split('-')[0]
-                        aliases={_norm(item.get('symbol','')),
-                                 _norm(item.get('ticker','')),_norm(fno_root)}
-                        opportunity['verified_fpi_disclosed_buy_recent']=bool(
-                            aliases & verified_fpi_buys)
-                        opportunity['fii_evidence_scope']=(
-                            'EXACT VERIFIED NSE BULK/BLOCK BUY ONLY — NOT TOTAL FII FLOW'
-                            if opportunity['verified_fpi_disclosed_buy_recent'] else
-                            'NO VERIFIED RECENT FPI BULK/BLOCK BUY EVIDENCE')
-                        opportunity_rows.append(opportunity)
-                rank=rank_rows.get(item['symbol']) if isinstance(rank_rows,dict) else None
-                result=multibagger.evaluate(
-                    daily,item['symbol'],daily.index[-1].date().isoformat(),
-                    fundamentals=fundamentals,surveillance=surveillance,rs_rank=rank)
-                if result is not None:multi_rows.append(result)
+                if swing_keys is None or liquidity_key(item) in swing_keys:
+                    swing_matches=swing.scan(daily,item['symbol'],now)
+                    opportunity=swing_opportunities.evaluate(daily,item['symbol'],now)
+                    guide=swing_guide.evaluate(daily,item['symbol'],now,benchmark=benchmark)
+                    if guide.get('matched_setups'):
+                        guide_rows.append(guide)
+                    include_opportunity=(opportunity['status']!='UNAVAILABLE' and
+                        opportunity['setup']!='NO BULLISH SETUP')
+                    if swing_matches or include_opportunity:
+                        gann_layer=swing_gann_wave.assess(daily,now)
+                        for candidate in swing_matches:
+                            enriched=dict(candidate)
+                            enriched['swing_gann_wave']=gann_layer
+                            enriched['gann_wave_alignment']=gann_layer['alignment']
+                            swing_rows.append(enriched)
+                        if include_opportunity:
+                            opportunity['swing_gann_wave']=gann_layer
+                            opportunity['gann_wave_alignment']=gann_layer.get('alignment','UNAVAILABLE')
+                            fno_root=str((item.get('future') or {}).get('symbol','')).split('-')[0]
+                            aliases={_norm(item.get('symbol','')),
+                                     _norm(item.get('ticker','')),_norm(fno_root)}
+                            opportunity['verified_fpi_disclosed_buy_recent']=bool(
+                                aliases & verified_fpi_buys)
+                            opportunity['fii_evidence_scope']=(
+                                'EXACT VERIFIED NSE BULK/BLOCK BUY ONLY — NOT TOTAL FII FLOW'
+                                if opportunity['verified_fpi_disclosed_buy_recent'] else
+                                'NO VERIFIED RECENT FPI BULK/BLOCK BUY EVIDENCE')
+                            opportunity_rows.append(opportunity)
+                if not swing_only:
+                    rank=rank_rows.get(item['symbol']) if isinstance(rank_rows,dict) else None
+                    result=multibagger.evaluate(
+                        daily,item['symbol'],daily.index[-1].date().isoformat(),
+                        fundamentals=fundamentals,surveillance=surveillance,rs_rank=rank)
+                    if result is not None:multi_rows.append(result)
             except (BrokerUnavailable,ValueError,KeyError,TypeError,IndexError):
                 failures+=1
         swing_guide.rank(guide_rows)
@@ -1249,14 +1253,15 @@ class InsightsService:
             guide_rs_universe='RANKED ONLY WITHIN SAMPLED MAPPED CASH UNIVERSE',
             status='DAILY SWING RESEARCH COMPLETE',
             **meta),now)
-        self._update('multibagger',dict(
-            candidates=multi_rows[:100],
-            status='COMPLETED-CANDLE MULTIBAGGER RESEARCH; NOT A RETURN FORECAST',
-            fundamentals_source='LOCAL DATED ATTRIBUTABLE FILE' if fundamentals else 'UNVERIFIED',
-            surveillance_source='LOCAL DATED ATTRIBUTABLE FILE' if surveillance else 'UNVERIFIED',
-            rs_rank_source='LOCAL DATED REFERENCE' if rank_rows else 'UNVERIFIED',
-            available_eligibility=sum(row['eligible'] for row in multi_rows),
-            **meta),now)
+        if not swing_only:
+            self._update('multibagger',dict(
+                candidates=multi_rows[:100],
+                status='COMPLETED-CANDLE MULTIBAGGER RESEARCH; NOT A RETURN FORECAST',
+                fundamentals_source='LOCAL DATED ATTRIBUTABLE FILE' if fundamentals else 'UNVERIFIED',
+                surveillance_source='LOCAL DATED ATTRIBUTABLE FILE' if surveillance else 'UNVERIFIED',
+                rs_rank_source='LOCAL DATED REFERENCE' if rank_rows else 'UNVERIFIED',
+                available_eligibility=sum(row['eligible'] for row in multi_rows),
+                **meta),now)
         return dict(swing_count=len(swing_rows),swing_guide_matches=len(guide_rows),
                     swing_opportunity_ready=len(ready_opps),
                     swing_opportunity_watch=len(watch_opps),
@@ -1312,7 +1317,7 @@ class InsightsService:
             try:
                 key=(local.date().isoformat(),'longterm-daily')
                 if key in self._done:return dict(status='DAILY LONGTERM ALREADY COMPLETE')
-                result=self.scan_longterm(local)
+                result=self.scan_longterm(local,swing_keys={liquidity_key(x) for x in self.liquidity.selected('swing-trades',local)})
                 # Produce and persist the NEXT morning's watchlist using
                 # today's fully completed daily candles. Any premarket
                 # failure is reported, but cannot retroactively erase the
@@ -1342,25 +1347,14 @@ class InsightsService:
         completed=[]
         try:
             date=now.date().isoformat()
-            # Broad stock discovery is ONLY at ~09:45 and ~10:00. Subsequent
-            # monitoring only uses the locked shortlist.
+            if (local.hour,local.minute)>=(9,45):
+                self.refresh_liquidity(local)
             jobs=[
                 ('dashboard',(9,20),self.dashboard),
-                ('shortlist-preview',(9,45),lambda stamp:self.discover_shortlist(stamp,final=False)),
-                # Opening CE/PE research begins at 09:30 through the
-                # normal five-minute option monitor below; do not add
-                # a second one-off 09:30 job here.
-                ('index-options-preview',(9,45),self.scan_index_options),
-                ('fo-stocks-preview',(9,45),self.scan_fo),
-                ('shortlist-final',(10,0),lambda stamp:self.discover_shortlist(stamp,final=True)),
-                ('index-options',(10,0),self.scan_index_options),
-                ('fo-stocks',(10,0),self.scan_fo),
-                ('intraday',(10,5),self.scan_intraday),
                 ('btst-closing-preview',(14,30),self.scan_btst_closing),
                 ('btst',(15,0),self.scan_btst),
                 ('btst-closing-confirm',(15,5),self.scan_btst_closing),
-                ('btst-closing-final',(15,20),self.scan_btst_closing)
-            ]
+                ('btst-closing-final',(15,20),self.scan_btst_closing)]
             for name,clock,job in jobs:
                 key=(date,name)
                 if (now.hour,now.minute)<clock or key in self._done:
@@ -1387,6 +1381,15 @@ class InsightsService:
                     with self._lock:
                         self._last_error=f'{name}: {str(exc)[:160]}'
             minute=now.hour*60+now.minute
+            if minute>=9*60+45:
+                for name,job in (('intraday-liquidity-monitor',self.scan_intraday),('fo-liquidity-monitor',self.scan_fo),('swing-liquidity-monitor',self.scan_swing_shortlist)):
+                    monitor_key=(date,name,minute//5)
+                    if monitor_key in self._done:continue
+                    self._done.add(monitor_key)
+                    try:
+                        job(now);completed.append(name)
+                    except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
+                        with self._lock:self._last_error=f'{name}: {str(exc)[:160]}'
             if minute%5==0:
                 key=(date,'dashboard-refresh',minute//5)
                 if key not in self._done:
@@ -1397,42 +1400,13 @@ class InsightsService:
                         except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
                             with self._lock:self._last_error=f'dashboard: {str(exc)[:160]}'
                     self._done.add(key)
-                # MTF intraday scoring only revisits symbols selected at 10:00.
-                key=(date,'shortlist-monitor',minute//5)
-                if minute>=10*60+5 and key not in self._done:
-                    if 'intraday' not in completed:
-                        try:
-                            self.scan_intraday(now)
-                            completed.append('shortlist-monitor')
-                        except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
-                            with self._lock:self._last_error=f'intraday: {str(exc)[:160]}'
-                    self._done.add(key)
-                # Opening 5m and redbar watches use ONE scheduler route
-                # from 09:30, every completed five-minute boundary.
-                # At 09:45 and 10:00, the existing preview/final jobs
-                # take precedence, so the monitor cannot call them twice.
                 if minute>=9*60+30:
-                    for name,job in (
-                        ('index-options-monitor',self.scan_index_options),
-                        ('fo-stocks-monitor',self.scan_fo),
-                    ):
-                        corresponding=(
-                            ('index-options-preview','index-options')
-                            if name=='index-options-monitor' else
-                            ('fo-stocks-preview','fo-stocks'))
-                        if any(n in completed for n in corresponding):
-                            continue
-                        key=(date,name,minute//5)
-                        if key in self._done:
-                            continue
-                        try:
-                            job(now)
-                            completed.append(name)
+                    key=(date,'index-options-monitor',minute//5)
+                    if key not in self._done:
+                        self._done.add(key)
+                        try:self.scan_index_options(now);completed.append('index-options-monitor')
                         except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
-                            with self._lock:
-                                self._last_error=f'{name}: {str(exc)[:160]}'
-                        else:
-                            self._done.add(key)
+                            with self._lock:self._last_error='index-options: '+str(exc)[:160]
                 key=(date,'outcomes',minute//5)
                 if key not in self._done:
                     try:self.reconcile_outcomes(now)

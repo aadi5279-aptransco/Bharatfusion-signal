@@ -61,7 +61,7 @@ class ScannerReadinessTests(unittest.TestCase):
    self.assertEqual(r['buy_signals'],[])
    self.assertEqual(r['sell_signals'],[])
    self.assertFalse(r['shortlist_finalized'])
-   self.assertIn('WAITING FOR FINAL 10:00 SHORTLIST',r['status'])
+   self.assertIn('WAITING FOR 09:45 LIQUIDITY SHORTLIST',r['status'])
    self.assertEqual(broker.calls,[])
  def test_missing_index_context_is_diagnostic_not_signal(self):
   with tempfile.TemporaryDirectory() as path:
@@ -75,3 +75,4 @@ class ScannerReadinessTests(unittest.TestCase):
    self.assertIn('MOMENTUM QUERY SCAN COMPLETE',r['status'])
 
 if __name__=='__main__':unittest.main()
+

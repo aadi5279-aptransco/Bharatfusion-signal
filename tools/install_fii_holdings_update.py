@@ -19,6 +19,8 @@ def install(source, target):
     # dependencies. Unrelated local-only files are retained.
     files=sorted((source/'insights').rglob('*.py'))
     files.append(source/'tools'/'install_fii_holdings_update.py')
+    scheduler_test=source/'tests'/'test_staged_scheduler.py'
+    if scheduler_test.is_file():files.append(scheduler_test)
     files+=sorted(p for p in (source/'web'/'src').rglob('*') if p.suffix in ('.js','.css'))
     plan=[(p,p.relative_to(source),target/p.relative_to(source)) for p in files]
     backup=target/'update_backups'/('fii-holdings-'+datetime.now().strftime('%Y%m%d-%H%M%S-%f'))

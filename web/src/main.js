@@ -577,7 +577,7 @@ function ReadinessPanel(){
     e('div',null,'Cached index sectors: ',e('b',null,state.cached_index_count,' indices / ',state.cached_sector_count,' sectors')),
     e('div',null,'Sector mappings: ',e('b',null,state.mapped_sector_symbols)),
     e('div',null,'Orders: ',e('b',null,'DISABLED'))),
-   e('p',{className:'small muted'},'This panel checks infrastructure only. Preliminary 09:45 rankings are not orders; 10:00 is the target shortlist lock; later checks reuse that shortlist.'),
+   e('p',{className:'small muted'},'This panel checks infrastructure only. Liquidity discovery runs at 09:45, 10:00 and hourly through 15:00 IST; five-minute stock checks use stored lists.'),
    ...(state.warnings||[]).map((w,j)=>e('p',{className:'small muted',key:j},'• ',w)),
    e('p',{className:'small muted'},'For a read-only Dhan data, option-chain and futures OI test, run CHECK_SCANNER_READINESS.bat from your application folder.')));
 }
@@ -723,9 +723,9 @@ function IntradaySignals({data}){
        'Daily bullish momentum: all 8 conditions and 15m EMA20/RSI>60/volume >2× average. Provisional daily candle.':
        'Daily bearish momentum: all 8 conditions and 15m EMA20/RSI<40/volume >2× average. Provisional daily candle.'),
     e(Signals,{items:signals,empty:!data.shortlist_finalized?
-      'Awaiting 09:45 preliminary and 10:00 finalized watchlist. Early rankings are NOT executable trades.':
+      'Awaiting scheduled liquidity shortlist. Liquidity selection is not a trade signal.':
       'No qualifying '+(isBuy?'breakout BUY':'breakdown SELL')+' signals on the locked shortlist.'})),
-   data.shortlist_finalized?e(Section,{title:'10:00 locked shortlist — monitored without broad rescans'},
+   data.shortlist_finalized?e(Section,{title:'Stored liquid-stock shortlist — monitored every five minutes'},
        (data.shortlist_symbols||[]).length?
        e('div',{className:'shortlist-chips'},(data.shortlist_symbols||[]).map((name,i)=>
          e('span',{key:i,className:'shortlist-chip'},name))):
@@ -959,6 +959,13 @@ function App(){
     e('div',{className:'top-actions'},e(Badge,{type:'positive'},'NO ORDER PLACEMENT'),e(Badge,null,'DHAN · '+health.status),e('button',{className:'theme-btn',onClick:()=>setTheme(theme==='dark'?'light':'dark')},theme==='dark'?'☀ Light':'☾ Dark'))),
    e('main',{className:'content'},e(Notice,{warning:true},RISK),
     error?e(Notice,{warning:true},error):null,
+    ['Intraday','F&O Stocks','Swing Trades'].includes(active)?e(Section,{title:'Scheduled liquidity shortlist'},
+     e('p',null,'Broad discovery: 09:45, 10:00, 11:00, 12:00, 13:00, 14:00, 15:00 IST. Strategy checks: every 5 minutes on stored selections only.'),
+     e('p',{className:'small muted'},'Status: ',data.liquidity?.status||'Waiting for 09:45',' · Last successful refresh: ',data.liquidity?.updated_at||'—',
+       ' · Mapped: ',data.liquidity?.universe??'—',' · Valid quotes: ',data.liquidity?.quoted??'—',' · Missing: ',data.liquidity?.missing??'—',
+       ' · Selected: ',data.liquidity?.selected_counts?.[route[active]]??0),
+     data.liquidity?.error?e(Notice,{warning:true},data.liquidity.error):null,
+     e('p',{className:'small muted'},'Liquidity = session volume × last price (turnover proxy). Price ≥ ₹20; session volume ≥ 1 lakh; turnover proxy ≥ ₹1 crore. Top stocks by turnover, capped by INSIGHTS_MAX_SYMBOLS. Swing strategies retain completed daily/weekly candle rules.')):null,
     active==='Dashboard'?e(Dashboard,{data,onRefresh,refreshBusy,refreshState:health.manual_refresh,refreshError}):null,
     active==='Analyse'?e(Analyse,{data,onSearch,busy}):null,
     active==='Positional'?e(PositionalPanel):null,
@@ -970,7 +977,7 @@ function App(){
     ['Intraday','BTST','Index Options','F&O Stocks'].includes(active)?e(React.Fragment,null,
      e(ReadinessPanel),
      active==='BTST'?e(BTSTClosingStrength):null,
-     e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'09:45 Preview · 10:00 Final · 5m Follow-up':active==='BTST'?'Scheduled 15:00 IST':'Opening 09:30 · every 5m · research'}),
+     e('div',{className:'tile-grid'},e(Tile,{title:'MODULE',value:active,sub:active==='Intraday'?'09:45 + hourly liquidity refresh · 5m strategy checks':active==='BTST'?'Scheduled 15:00 IST':'Opening 09:30 · every 5m · research'}),
        e(Tile,{title:['Index Options','F&O Stocks'].includes(active)?'SPOT WATCHES + LEGACY':'CANDIDATES',
            value:(data.signals||[]).length+(['Index Options','F&O Stocks'].includes(active)?(data.opening_ready||0):0),
            sub:active==='Intraday'?`BUY ${data.qualified_buy||0} · SELL ${data.qualified_sell||0}`:
