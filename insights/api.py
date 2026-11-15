@@ -26,6 +26,9 @@ def create_app(service=None):
             if origin and origin!=request.host_url.rstrip('/'):
                 return jsonify(error='Same-origin requests only'),403
 
+    @app.get('/api/v1/market-insights/index-orderflow')
+    def index_orderflow():return jsonify(service.index_orderflow.snapshot())
+
     @app.get('/api/v1/market-insights/positional')
     def positional():return jsonify(service.positional_scanner.snapshot())
 

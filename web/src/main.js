@@ -4,6 +4,7 @@ import {createChart, CandlestickSeries, HistogramSeries} from 'lightweight-chart
 import './styles.css';
 import ScannerPanel from './scanner.js';
 import PositionalPanel from './positional.js';
+import IndexOrderFlowPanel from './index_orderflow.js';
 const e=React.createElement;
 const RISK='Rule-based analytics, not investment advice. Entries and targets are not guaranteed. Trading carries risk of loss. No orders are placed.';
 const tabs=[['Dashboard','▦'],['Scanner','▤'],['Positional','◈'],['Analyse','⌕'],['Pre-Market 8 AM','☼'],['Intraday','↗'],['BTST','◷'],['FII Stock Deals','⇄'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
@@ -969,6 +970,7 @@ function App(){
     active==='Dashboard'?e(Dashboard,{data,onRefresh,refreshBusy,refreshState:health.manual_refresh,refreshError}):null,
     active==='Analyse'?e(Analyse,{data,onSearch,busy}):null,
     active==='Positional'?e(PositionalPanel):null,
+    active==='Index Options'?e(IndexOrderFlowPanel):null,
     active==='Scanner'?e(ScannerPanel,{onAnalyse:symbol=>{select('Analyse');onSearch(symbol);}}):null,
     active==='Pre-Market 8 AM'?e(PremarketWatch,{data}):null,
     active==='FII Stock Deals'?e(FIIStockDealsPanel):null,
