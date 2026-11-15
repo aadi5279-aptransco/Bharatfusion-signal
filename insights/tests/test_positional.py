@@ -136,7 +136,8 @@ class WorkerTests(unittest.TestCase):
     def tearDown(self):self.s.stop();self.temp.cleanup()
     def test_reuses_daily_but_rechecks_5m(self):
         self.s._run(self.now);self.s._run(self.now+timedelta(minutes=5))
-        self.assertEqual(self.b.daily_calls,1);self.assertEqual(self.b.history_calls,2)
+        # Legacy daily + EMA9 long daily are each fetched once; hourly once plus two 5m checks.
+        self.assertEqual(self.b.daily_calls,2);self.assertEqual(self.b.history_calls,3)
         self.assertEqual(self.s.snapshot()['coverage']['scanned'],1)
     def test_failed_scan_invalidates_previous_rows(self):
         self.s._run(self.now);self.s.holidays=lambda:None;self.s._run(self.now)

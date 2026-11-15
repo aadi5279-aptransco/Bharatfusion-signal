@@ -77,3 +77,7 @@ These published concepts are not evidence that this implementation is profitable
    ```
 
 Automated tests cover the strategies on constructed OHLCV, incomplete/future bars, stale data, stop/target checks, retained watch expiry, cached daily/repeated 5m requests, non-overlapping scheduling and API behavior. They are correctness tests, not a profitability backtest. Live Dhan and full interactive Windows UI verification require your running environment.
+
+## EMA9 multi-timeframe addition
+
+The latest update also adds **EMA9 Trendline + Volume** on 1H, 1D, 1W and 1M. See [EMA9_POSITIONAL_UPDATE.md](EMA9_POSITIONAL_UPDATE.md) for its exact rules, installer, 3R target, history coverage and adjusted-data confirmation requirements. Existing strategy rules above are unchanged.
