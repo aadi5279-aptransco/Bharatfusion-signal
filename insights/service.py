@@ -16,6 +16,7 @@ from insights.orderflow import IndexOrderFlow
 from insights.europe_markets import EuropeMarkets
 from insights.qglp import QGLPResearch
 from insights.event_center import EventCenter
+from insights.premarket_followthrough import PremarketFollowthrough
 from insights.liquidity_shortlist import LiquidityShortlist, key as liquidity_key
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
@@ -86,6 +87,7 @@ class InsightsService:
         self.europe_markets=EuropeMarkets()
         self.index_orderflow=IndexOrderFlow(self.broker,self.root,_holiday_set,self._job_lock)
         self.liquidity=LiquidityShortlist(self.broker,self.root)
+        self.premarket_followthrough=PremarketFollowthrough(self,_holiday_set)
         self.event_center=EventCenter(self.root,self)
         self._done=set();self._thread=None;self._stop=threading.Event()
         self._shortlist_date=None
@@ -1436,6 +1438,7 @@ class InsightsService:
         self.index_orderflow.start()
         self.europe_markets.start()
         self.event_center.start()
+        self.premarket_followthrough.start()
         def loop():
             while not self._stop.is_set():
                 # Official participant CSV download is independent from
@@ -1459,4 +1462,5 @@ class InsightsService:
         self.index_orderflow.stop()
         self.europe_markets.stop()
         self.event_center.stop()
+        self.premarket_followthrough.stop()
 

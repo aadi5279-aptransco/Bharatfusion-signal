@@ -18,7 +18,7 @@ SOURCES={
  'ECB':('https://www.ecb.europa.eu/rss/press.html','rss'),
  'BBC Business':('https://feeds.bbci.co.uk/news/business/rss.xml','rss'),
  'BLS calendar':('https://www.bls.gov/schedule/news_release/bls.ics','ics')}
-LABELS={'analyse-notification':'Analyse','intraday':'Intraday','fo-stocks':'F&O Stocks','index-options':'Index Options','btst':'BTST','btst-closing':'BTST closing','swing-trades':'Swing Trades','positional':'Positional','multibagger':'Multibagger'}
+LABELS={'premarket-followthrough':'Pre-Market 8 AM','analyse-notification':'Analyse','intraday':'Intraday','fo-stocks':'F&O Stocks','index-options':'Index Options','btst':'BTST','btst-closing':'BTST closing','swing-trades':'Swing Trades','positional':'Positional','multibagger':'Multibagger'}
 def digest(*parts):return hashlib.sha256('|'.join(map(str,parts)).encode()).hexdigest()
 def safe_url(url):
     try:
@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS alerts(seq INTEGER PRIMARY KEY AUTOINCREMENT,uid TEXT
         now=time.time() if now is None else now;day=datetime.fromtimestamp(now,IST).date().isoformat()
         for module,label in LABELS.items():
             try:
-                p=self.service.positional_scanner.snapshot() if module=='positional' else self.service.snapshot(module)
+                p=self.service.premarket_followthrough.snapshot() if module=='premarket-followthrough' else self.service.positional_scanner.snapshot() if module=='positional' else self.service.snapshot(module)
                 stamp=datetime.fromisoformat(p.get('updated_at','')).timestamp()
                 if not 0<=now-stamp<=600:continue
                 for r in trade_rows(module,p):

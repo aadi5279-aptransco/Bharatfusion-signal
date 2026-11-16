@@ -26,6 +26,9 @@ def create_app(service=None):
             if origin and origin!=request.host_url.rstrip('/'):
                 return jsonify(error='Same-origin requests only'),403
 
+    @app.get('/api/v1/market-insights/premarket-followthrough')
+    def premarket_followthrough():return jsonify(service.premarket_followthrough.snapshot())
+
     @app.get('/api/v1/market-insights/event-calendar')
     def event_calendar():return jsonify(service.event_center.snapshot())
 
