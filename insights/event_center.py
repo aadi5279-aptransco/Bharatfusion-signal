@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS alerts(seq INTEGER PRIMARY KEY AUTOINCREMENT,uid TEXT
                 stamp=datetime.fromisoformat(p.get('updated_at','')).timestamp()
                 if not 0<=now-stamp<=600:continue
                 for r in trade_rows(module,p):
-                    symbol=str(r.get('symbol',''));strategy=str(r.get('strategy') or r.get('setup') or 'Research ranking');side=str(r.get('direction') or r.get('side') or '')
+                    symbol=str(r.get('symbol') or r.get('underlying') or '');strategy=str(r.get('strategy') or r.get('setup') or 'Research ranking');side=str(r.get('direction') or r.get('side') or '')
                     if not symbol:continue
                     kind='watch' if r.get('notification_watch') or module=='multibagger' else 'research'
                     vals={k:r.get(k,r.get('spot_'+k)) for k in ('entry','sl','t1','t2')}

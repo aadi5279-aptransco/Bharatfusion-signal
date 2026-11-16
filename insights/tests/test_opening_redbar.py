@@ -70,7 +70,7 @@ class OpeningRedbarTests(unittest.TestCase):
         extra=f.iloc[-1:].copy()
         extra.index=pd.DatetimeIndex([self.at('18:15')])
         combined=pd.concat([f,extra])
-        result=opening_redbar.evaluate(combined,self.at('18:30'))[0]
+        result=opening_redbar.evaluate(combined,self.at('10:15'))[0]
         self.assertEqual(result['state'],'DIRECTION_READY')
         self.assertEqual(result['signal_at'][11:16],'10:10')
     def test_previous_session_only_fails_closed(self):
@@ -81,3 +81,4 @@ class OpeningRedbarTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+

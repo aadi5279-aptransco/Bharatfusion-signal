@@ -945,8 +945,21 @@ class InsightsService:
             results.append(verified)
         return results
 
+    def request_index_refresh(self):
+        now=datetime.now(IST)
+        if not is_market_session(now,_holiday_set()):return dict(status='BLOCKED',error='Verified market session required')
+        if not self._job_lock.acquire(blocking=False):return dict(status='BUSY',error='Another Dhan scan is running; automatic index scan will catch up')
+        def work():
+            try:self.scan_index_options(datetime.now(IST))
+            except Exception:
+                with self._lock:self._last_error='index-options: manual refresh failed; check source data'
+            finally:self._job_lock.release()
+        threading.Thread(target=work,daemon=True,name='IndexManualRefresh').start()
+        return dict(status='STARTED')
+
     def scan_index_options(self,now):
-        d=self.snapshot('dashboard');indices=d.get('indices',[]);signals=[];fib_setups=[];opening_setups=[]
+        now=now.astimezone(IST)
+        d=self.snapshot('dashboard');indices=d.get('indices',[]);signals=[];fib_setups=[];opening_setups=[];scan_issues=[]
         # Independent of the previous trend score: an intraday Fib reversal
         # must not disappear simply because dashboard bias is Sideways.
         try:
@@ -960,8 +973,23 @@ class InsightsService:
             norm=_norm(item['symbol'])
             if norm in seen:continue
             seen.add(norm)
-            opening_setups.extend(self._opening_setups(item,now))
-            fib_setups.extend(self._fib_setups(item,now))
+            try:
+                five=self.broker.history(item,now,minutes=5,lookback_days=8)
+                if isinstance(five,pd.DataFrame) and isinstance(five.index,pd.DatetimeIndex) and five.index.tz is not None:
+                    five=five.copy();five.index=five.index.tz_convert(IST)
+                    five=five[five.index+pd.Timedelta(minutes=5)<=pd.Timestamp(now)]
+                if five is None:raise ValueError('No five-minute history returned')
+                opening_setups.extend(self._opening_setups(item,now,cash_five=five))
+                fib_rows=self._fib_setups(item,now,cash_five=five)
+                fib_setups.extend(fib_rows)
+                if not fib_rows:scan_issues.append(item['symbol']+': Fibonacci input is missing or stale; opening rows explain candle readiness.')
+            except (BrokerUnavailable,ValueError,KeyError,TypeError,IndexError):
+                scan_issues.append(item['symbol']+': five-minute history unavailable; check Dhan data access and mapping.')
+                for key,name in (('first5',opening_redbar.FIRST),('redbar',opening_redbar.REDBAR)):
+                    opening_setups.append(dict(key=key,strategy=name,underlying=item['symbol'],state='DATA_UNAVAILABLE',reason='Dhan five-minute history failed; no entry inferred'))
+        mapped={_norm(x['symbol']) for x in available}
+        for label,aliases in [('NIFTY',{'NIFTY','NIFTY50'}),('BANKNIFTY',{'BANKNIFTY','NIFTYBANK'}),('SENSEX',{'SENSEX'})]:
+            if not mapped.intersection(aliases):scan_issues.append(label+': index instrument mapping unavailable')
         for idx in indices:
             if _norm(idx['symbol']) not in ('NIFTY','NIFTY50','BANKNIFTY','NIFTYBANK','SENSEX'):
                 continue
@@ -1003,14 +1031,14 @@ class InsightsService:
                     signals.append(cycle_wave.annotate(p,five,now))
                     # Never journal a hypothetical premium price as an observed signal.
             except (ValueError,BrokerUnavailable,KeyError):continue
-        phase='STORED LIQUIDITY SHORTLIST'
+        phase='INDEPENDENT MAPPED INDEX SCAN'
         self._update('index-options',dict(signals=signals,fib_setups=fib_setups,
               opening_setups=opening_setups,opening_ready=sum(x.get('state')=='DIRECTION_READY' for x in opening_setups),
               status=(phase+' — LEGACY OPTION PLANS + SPOT WATCHES' if signals else
                       phase+' — SPOT CE/PE WATCHES (PREMIUM UNVERIFIED)'
                       if any(x.get('state')=='DIRECTION_READY' for x in opening_setups)
                       else phase+' — NO CONFIRMED SPOT DIRECTION YET'),
-              phase=phase,scanned=len(indices),qualified=len(signals),mtf='5m+15m+60m',
+              phase=phase,scan_issues=scan_issues,scanned=len(available),qualified=len(signals),mtf='5m+15m+60m',
               note='Rechecked every 5 minutes. Index direction requires 5m/15m/60m; index volume may be unavailable. Option OI/PCR are positioning proxies; premium age unverified; no trades placed'),now)
         return signals
 
@@ -1285,7 +1313,7 @@ class InsightsService:
     def run_due(self,now=None):
         now=now or datetime.now(IST)
         calendar=_holiday_set()
-        local=now.astimezone(IST)
+        local=now.astimezone(IST);now=local
         # Reuse the central exchange-session/holiday guard, including the
         # built-in known closures. The off-hours window alone must never
         # bypass an exchange holiday excluded from a user-provided calendar.
@@ -1361,6 +1389,16 @@ class InsightsService:
         completed=[]
         try:
             date=now.date().isoformat()
+            # Catch up once in every five-minute bucket, even at 09:31/09:36.
+            # Run the small mapped-index universe before broad stock discovery.
+            if (now.hour,now.minute)>=(9,20):
+                index_key=(date,'index-options-monitor',(now.hour*60+now.minute)//5)
+                if index_key not in self._done:
+                    try:
+                        self.scan_index_options(now);completed.append('index-options-monitor')
+                        self._done.add(index_key)
+                    except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
+                        with self._lock:self._last_error='index-options: '+str(exc)[:160]
             if (local.hour,local.minute)>=(9,45):
                 self.refresh_liquidity(local)
             jobs=[
@@ -1414,13 +1452,6 @@ class InsightsService:
                         except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
                             with self._lock:self._last_error=f'dashboard: {str(exc)[:160]}'
                     self._done.add(key)
-                if minute>=9*60+30:
-                    key=(date,'index-options-monitor',minute//5)
-                    if key not in self._done:
-                        self._done.add(key)
-                        try:self.scan_index_options(now);completed.append('index-options-monitor')
-                        except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
-                            with self._lock:self._last_error='index-options: '+str(exc)[:160]
                 key=(date,'outcomes',minute//5)
                 if key not in self._done:
                     try:self.reconcile_outcomes(now)
