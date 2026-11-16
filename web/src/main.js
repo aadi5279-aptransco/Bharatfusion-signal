@@ -7,6 +7,7 @@ import PositionalPanel from './positional.js';
 import IndexOrderFlowPanel from './index_orderflow.js';
 import EuropeMarketsPanel from './europe_markets.js';
 import QGLPPanel from './qglp.js';
+import TrendMeter from './trend_meter.js';
 import {EventCalendar,NotificationCenter} from './event_center.js';
 const e=React.createElement;
 const RISK='Rule-based analytics, not investment advice. Entries and targets are not guaranteed. Trading carries risk of loss. No orders are placed.';
@@ -199,7 +200,8 @@ function Dashboard({data,onRefresh,refreshBusy,refreshState,refreshError}){
   refreshError?e(Notice,{warning:true},refreshError):null,
   refreshState?.status==='NO_DATA'||refreshState?.status==='FAILED'?e(Notice,{warning:true},refreshState.message||'Market data unavailable.'):null,
   data.not_live&&data.data_asof?e(Notice,{warning:true},'HISTORICAL SNAPSHOT — NOT LIVE. Bias and changes refer to the completed session dated '+lastSession+'. Do not use these as live entry signals.'):null,
-  e('div',{className:'tile-grid'},e(Tile,{title:'NIFTY 50 BIAS',value:nifty?.bias||'Awaiting data',sub:nifty?.score!=null?`Rule score: ${nifty.score}`:'EMA / VWAP / ADX / structure'}),e(Tile,{title:'SENSEX BIAS',value:sensex?.bias||'Awaiting data',sub:sensex?.score!=null?`Rule score: ${sensex.score}`:'Missing inputs are not guessed'}),e(Tile,{title:'SECTORS AVAILABLE',value:sectors.length,sub:'Dhan sector indices'}),e(Tile,{title:'MARKET DATA',value:data.status||'No connection',sub:data.updated_at||'Not updated'})),
+  e('div',{className:'trend-meter-grid'},...(indices.length?indices:[{symbol:'NIFTY 50'},{symbol:'SENSEX'}]).map(x=>e(TrendMeter,{key:x.symbol,title:x.symbol+' TREND',bias:x.bias,score:x.score,asof:x.asof||data.data_asof,historical:!!data.not_live}))),
+  e('div',{className:'tile-grid trend-meter-summary'},e(Tile,{title:'SECTORS AVAILABLE',value:sectors.length,sub:'Dhan sector indices'}),e(Tile,{title:'MARKET DATA',value:data.status||'No connection',sub:data.updated_at||'Not updated'})),
   e(EuropeMarketsPanel),
   e(ParticipantPositioning),
   e('div',{className:'split'},
