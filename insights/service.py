@@ -16,11 +16,12 @@ from insights.orderflow import IndexOrderFlow
 from insights.europe_markets import EuropeMarkets
 from insights.qglp import QGLPResearch
 from insights.event_center import EventCenter
-from insights.premarket_followthrough import PremarketFollowthrough
+from insights.premarket_followthrough import PremarketFollowthrough,prior_session
 from insights.liquidity_shortlist import LiquidityShortlist, key as liquidity_key
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
 from insights.dashboard_trend import dashboard_trend
+from insights import premarket_setups
 from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
@@ -796,25 +797,37 @@ class InsightsService:
         # Sort by symbol only for deterministic sampling; mapped NSE
         # F&O stock universe is small enough for near-complete coverage.
         universe=sorted(all_stocks,key=lambda x:_norm(x['symbol']))[:maximum]
-        rows=[];unavailable=0;short=0
+        rows=[];unavailable=0;short=0;stale=0;audit=[]
+        expected=now.date() if (now.hour,now.minute)>=(15,40) else prior_session(now,_holiday_set())
         for item in universe:
             try:
-                daily=self.broker.daily(item,now,days=180)
+                daily=premarket_setups.fetch_daily(self.broker,item,now)
+                try:premarket_setups.prepare(daily,now)
+                except (ValueError,TypeError) as exc:
+                    short+=1;audit.append(dict(symbol=item['symbol'],ticker=item.get('ticker',''),status='INVALID / SHORT HISTORY',reason=str(exc)));continue
                 row=premarket.evaluate(daily,item['symbol'],now)
-                if row is None:short+=1;continue
+                if row is None:
+                    short+=1;audit.append(dict(symbol=item['symbol'],ticker=item.get('ticker',''),status='INVALID HISTORY',reason='Daily validation failed'));continue
+                if row['previous_session']!=expected.isoformat():
+                    stale+=1;audit.append(dict(symbol=item['symbol'],ticker=item.get('ticker',''),status='STALE DAILY DATA',reason='Expected '+expected.isoformat()+'; got '+row['previous_session']));continue
                 row['instrument_id']=str(item.get('id',''))
+                row['ticker']=item.get('ticker',item['symbol'])
+                audit.append(dict(symbol=item['symbol'],ticker=row['ticker'],status='SETUP MATCH' if row['setups'] else 'NO SETUP',reason='; '.join(s['strategy'] for s in row['setups']) or '; '.join(row['setup_exclusions'])))
                 rows.append(row)
             except (BrokerUnavailable,ValueError,KeyError,TypeError,IndexError):
                 unavailable+=1
+                audit.append(dict(symbol=item['symbol'],ticker=item.get('ticker',''),status='SOURCE ERROR',reason='Broker daily request or mapping failed; check data entitlement, connection and mapping'))
         ranked=premarket.rank(rows,now.isoformat(),limit=10)
         dates={x['previous_session'] for x in rows}
         payload=dict(ranked,universe=len(universe),available_instrument_master=len(all_stocks),
-            assessed=len(rows),unavailable_count=unavailable,insufficient_history=short,
+            assessed=len(rows),unavailable_count=unavailable,insufficient_history=short,stale_count=stale,
+            scan_version=premarket_setups.VERSION,audit=audit,expected_session=expected.isoformat(),
+            coverage_pct=round(100*len(rows)/len(universe),1) if universe else 0,
             previous_session=max(dates) if dates else None,
             mixed_data_dates=len(dates)>1,
             status='08:00 PRIOR-SESSION WATCHLIST — NOT A TRADE' if rows
                  else 'NO VERIFIED PRIOR-SESSION WATCHLIST DATA',
-            note='Based only on the latest completed daily bars. Previous-day movers and 20-day closing breakouts are identified separately. Not a promise of next-day direction.')
+            note='Setup candidates require liquidity and compression or volume-confirmed breaks. Prior-day momentum ranks remain separate. Watch levels are not entries; live confirmation is required.')
         self._update('pre-market',payload,now)
         # Atomic local cache. A crash may leave the old watchlist, which
         # the morning scheduler validates against the expected session.
@@ -1351,6 +1364,7 @@ class InsightsService:
                 else:prior=None
                 cached=self.snapshot('pre-market')
                 if (prior is not None and cached.get('previous_session')==prior.date().isoformat()
+                    and cached.get('scan_version')==premarket_setups.VERSION
                     and cached.get('assessed',0)>0 and not cached.get('mixed_data_dates')):
                     self._done.add(key)
                     return dict(status='PRE-MARKET WATCHLIST READY FROM PRIOR CLOSE',

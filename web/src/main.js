@@ -612,11 +612,22 @@ function PremarketWatch({data={}}){
       e(Tile,{title:'WATCHLIST STATE',value:data.status||'WAITING'}),
       e(Tile,{title:'DAILY DATA DATE',value:data.previous_session||'—'}),
       e(Tile,{title:'COVERAGE',value:data.assessed??'—',sub:'Sampled '+(data.universe??'—')+' of '+(data.available_instrument_master??'—')}),
-      e(Tile,{title:'DATA ERRORS',value:(data.unavailable_count??0)+(data.insufficient_history??0)})),
+      e(Tile,{title:'DATA ERRORS',value:(data.unavailable_count??0)+(data.insufficient_history??0)+(data.stale_count??0)})),
+   data.coverage_pct!=null&&data.coverage_pct<90?e(Notice,{warning:true},`Partial daily-data coverage: ${data.assessed}/${data.universe} (${data.coverage_pct}%). Missing stocks are not negative signals. Review scan diagnostics below.`):null,
+   e(Section,{title:'Breakout / breakdown setup candidates — awaiting live confirmation'},
+     e('p',{className:'small muted'},'Liquid stocks with compression near a 20-day level, volume-confirmed breaks, or NR7 / inside-day compression. Watch levels are reference boundaries, not entry orders. Scores are heuristic ranks, not probabilities.'),
+     (data.candidates||[]).length?e('div',{className:'tablewrap'},e('table',{className:'research-table'},
+       e('thead',null,e('tr',null,...['Stock','Setup','Watch above','Watch below','Score','Evidence'].map(h=>e('th',{key:h},h)))),
+       e('tbody',null,...data.candidates.flatMap(x=>(x.setups||[]).map((p,i)=>e('tr',{key:x.symbol+i},
+         e('td',null,x.ticker||x.symbol,e('small',null,x.symbol)),e('td',null,p.strategy+' · '+p.direction),e('td',null,price(p.watch_above)),e('td',null,price(p.watch_below)),e('td',null,p.score),e('td',null,p.reason+'; average turnover ₹'+x.setup_metrics.average_turnover_cr+' crore')))))))
+       :e('p',{className:'muted'},'No qualifying setup in verified data. Prior-day movers below are a separate list.')),
+   e('details',null,e('summary',null,'Per-stock scan diagnostics ('+(data.audit||[]).length+')'),
+     e('div',{className:'tablewrap'},e('table',{className:'research-table'},e('thead',null,e('tr',null,...['Stock','Status','Reason'].map(h=>e('th',{key:h},h)))),
+       e('tbody',null,...(data.audit||[]).map((x,i)=>e('tr',{key:i},e('td',null,x.ticker||x.symbol),e('td',null,x.status),e('td',null,x.reason))))))),
    data.mixed_data_dates?e(Notice,{warning:true},'Multiple data session dates found; freshness needs checking.'):null,
    e('div',{className:'analyse-selection-grid'},
-       group('Top previous-day gainers',data.gainers||[]),
-       group('Top previous-day losers',data.losers||[])),
+       group('Prior-day positive momentum ranks',data.gainers||[]),
+       group('Prior-day negative momentum ranks',data.losers||[])),
    e('p',{className:'small muted'},data.note||'Starts at 8:00 AM on an eligible session when app is running and broker history is accessible.'));
 }
 function OpeningOptionSetups({items=[]}){
