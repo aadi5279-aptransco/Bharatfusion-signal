@@ -9,6 +9,7 @@ import EuropeMarketsPanel from './europe_markets.js';
 import QGLPPanel from './qglp.js';
 import TrendMeter from './trend_meter.js';
 import PremarketFollowthrough from './premarket_followthrough.js';
+import IndexScanStatus from './index_scan_status.js';
 import {EventCalendar,NotificationCenter} from './event_center.js';
 const e=React.createElement;
 const RISK='Rule-based analytics, not investment advice. Entries and targets are not guaranteed. Trading carries risk of loss. No orders are placed.';
@@ -621,11 +622,11 @@ function PremarketWatch({data={}}){
 function OpeningOptionSetups({items=[]}){
  const [index,setIndex]=useState(0);
  const selected=items[Math.min(index,Math.max(0,items.length-1))]||null;
- const names=['Underlying','Strategy','State','Side','CE trigger','PE trigger','Spot entry','Spot SL','Spot T1','Spot T2','Option status'];
+ const names=['Underlying','Strategy','State','Side','CE trigger','PE trigger','Spot entry','Spot SL','Spot T1','Spot T2','Option status','Why / latest closes'];
  const rows=items.map((x,i)=>{
    const values=[x.underlying,x.strategy,x.state,x.side||'—',
      x.trigger_ce??'—',x.trigger_pe??'—',x.spot_entry??'—',x.spot_sl??'—',
-     x.spot_t1??'—',x.spot_t2??'—',x.trade_status||'UNVERIFIED'];
+     x.spot_t1??'—',x.spot_t2??'—',x.trade_status||'UNVERIFIED',e('div',null,x.reason||'Waiting for scan',e('small',null,' Last closes: ',(x.last_two_closes||[]).join(' / ')||'—'))];
    return e('tr',{key:i},...values.map((v,j)=>e('td',{key:j},v)));
  });
  const table=e('table',{className:'research-table'},
@@ -978,7 +979,7 @@ function App(){
     active==='Dashboard'?e(Dashboard,{data,onRefresh,refreshBusy,refreshState:health.manual_refresh,refreshError}):null,
     active==='Analyse'?e(Analyse,{data,onSearch,busy}):null,
     active==='Positional'?e(PositionalPanel):null,
-    active==='Index Options'?e(IndexOrderFlowPanel):null,
+    active==='Index Options'?e(React.Fragment,null,e(IndexScanStatus,{data}),e(IndexOrderFlowPanel)):null,
     active==='Scanner'?e(ScannerPanel,{onAnalyse:symbol=>{select('Analyse');onSearch(symbol);}}):null,
     active==='Pre-Market 8 AM'?e(React.Fragment,null,e(PremarketWatch,{data}),e(PremarketFollowthrough)):null,
     active==='FII Stock Deals'?e(FIIStockDealsPanel):null,

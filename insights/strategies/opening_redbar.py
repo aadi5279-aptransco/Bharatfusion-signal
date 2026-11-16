@@ -15,6 +15,7 @@ Only *regular session* completed 5-minute candles are read, no look-ahead.
 from __future__ import annotations
 import math
 import pandas as pd
+from insights.config import IST
 
 VERSION="opening-redbar-v1"
 FIRST="First 5m 0/1 Break"
@@ -38,17 +39,20 @@ def _session(frame,now):
         return None
     if frame.index.has_duplicates or not {"open","high","low","close","volume"}.issubset(frame.columns):
         return None
-    f=frame.sort_index().copy()
+    t=t.tz_convert(IST)
+    f=frame.sort_index().copy();f.index=f.index.tz_convert(IST)
     f=f[(f.index.date==t.date())&(f.index+pd.Timedelta(minutes=5)<=t)]
     f=f[(f.index.hour*60+f.index.minute>=555)&
         (f.index.hour*60+f.index.minute<=925)&
         ((f.index.hour*60+f.index.minute-555)%5==0)]
     if f.empty or (f.index[0].hour,f.index[0].minute)!=(9,15):
         return None
+    if (t-(f.index[-1]+pd.Timedelta(minutes=5))).total_seconds()>600:return None
     try:
         cols=["open","high","low","close","volume"]
         f[cols]=f[cols].astype(float)
     except (ValueError,TypeError):return None
+    if not f[cols].map(math.isfinite).all().all() or (f.volume<0).any():return None
     if not f[cols].notna().all().all() or not (f[cols[:4]]>0).all().all():
         return None
     if (f.high<f[["open","low","close"]].max(axis=1)).any() or (
@@ -66,7 +70,8 @@ def _sustain(post,threshold,side):
 
 def _calculate(f,now,key):
     out=_base(key,now)
-    if f is None:return dict(out,reason="Missing valid consecutive completed session 5m spot/cash candles")
+    if f is None:return dict(out,reason="Missing/stale/gapped five-minute candles: need regular-session bars from 09:15 through the latest completed bar")
+    out.update(session_bars=len(f),latest_closed_at=f.index[-1].isoformat())
     if key=="first5":
         ref=f.iloc[0]
         reference_at=f.index[0]
@@ -101,6 +106,8 @@ def _calculate(f,now,key):
                trigger_ce=round(upper,4),trigger_pe=round(lower,4),
                spot_price=round(float(f.close.iloc[-1]),2),
                signal_at=f.index[-1].isoformat())
+    out.update(confirmation_bars=len(post),latest_closed_at=f.index[-1].isoformat(),
+               last_two_closes=[round(float(v),4) for v in post.close.tail(2)])
     if len(post)<2:
         return dict(out,reason="Waiting for two completed 5m closes AFTER reference candle")
     # No overlapping CE/PE condition. A single wick does not qualify.
@@ -129,3 +136,4 @@ def _calculate(f,now,key):
 def evaluate(frame,now):
     """Always return both strategy states, including waiting/no-trade reasons."""
     return [_calculate(_session(frame,now),now,key) for key in ("first5","redbar")]
+
