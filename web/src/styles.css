@@ -150,3 +150,13 @@
 @media(max-width:800px){.scanner-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.scanner-toolbar{grid-template-columns:repeat(2,minmax(0,1fr))}.scanner-filter-grid label{grid-template-columns:1fr}.scanner-title{align-items:start}.scanner-title h2{font-size:18px}}
 @media(max-width:480px){.scanner-filter-grid,.scanner-toolbar{grid-template-columns:1fr}.scanner-title{flex-direction:column}.scanner-source-controls label{width:100%}}
 .positional-panel{display:grid;gap:20px}.positional-panel .panel{padding:20px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.positional-filters{display:flex;gap:20px;align-items:end;flex-wrap:wrap}.positional-filters label{display:grid;gap:6px}.positional-filters input,.positional-filters select{background:var(--panel2);color:var(--ink);padding:9px;border:1px solid var(--line);border-radius:6px}.positional-results small{display:block;font-size:11px;margin-top:6px;color:var(--muted)}.positional-results td:first-child{min-width:170px}.positional-reason{min-width:300px;max-width:480px;white-space:normal!important;text-align:left!important}.positional-reason p{line-height:1.5;font-size:12px}.positional-results h3{margin-bottom:18px}
+
+/* Trend meters: existing signed rule score, not a probability. */
+.trend-meter{text-align:center;min-width:0;padding:20px 16px!important}.trend-meter .kicker{color:var(--ink);text-align:left;letter-spacing:.09em}
+.trend-meter-svg{display:block;width:100%;max-width:300px;height:auto;margin:12px auto 0;overflow:visible}
+.trend-arc-bear{stroke:#eb3349}.trend-arc-neutral{stroke:#858b96}.trend-arc-bull{stroke:#00a886}
+.trend-tick{stroke:var(--muted);stroke-width:1.5}.trend-needle{stroke:var(--ink);stroke-width:3.5;stroke-linecap:round}.trend-pivot{fill:var(--ink)}
+.trend-end-label{fill:var(--muted);font-size:10px;font-family:inherit}.trend-reading{display:flex;justify-content:center;align-items:baseline;gap:9px;font-size:18px;font-weight:600;margin:4px 0 0}.trend-reading strong{font-size:25px;color:var(--ink);font-variant-numeric:tabular-nums}
+.trend-bear{color:#eb3349}.trend-bull{color:#00a886}.trend-neutral{color:var(--muted)}.trend-caption{color:var(--muted);font-size:9px;letter-spacing:.08em;margin:6px 0 12px}.trend-meter .small{font-size:10px;margin:4px 0;overflow-wrap:anywhere}.trend-meter-empty .trend-meter-svg{opacity:.35}
+.trend-meter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin:16px 0}.trend-meter-summary{margin-bottom:16px}
+@media(max-width:520px){.trend-meter-grid{grid-template-columns:1fr}.trend-meter-svg{max-width:270px}}
