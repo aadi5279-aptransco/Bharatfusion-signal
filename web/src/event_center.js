@@ -9,7 +9,7 @@ export function NotificationCenter({onOpen}){
  const fresh=d.alerts.filter(a=>a.id>cursor&&!a.seen&&Date.now()/1000-a.created<120);const newest=d.alerts[0]?.id||0;
  if(cursor&&fresh.length){setToasts(fresh.slice(0,3));if(desktop&&'Notification' in window&&Notification.permission==='granted'){
   try{const list=fresh.length>3?[{title:`${fresh.length} new BharatSignal alerts`,body:'Open the notification inbox for every alert.',id:newest,tab:'Event Calendar'}]:fresh;
-  list.forEach(a=>{const n=new Notification(a.title,{body:a.body,tag:'bharat-'+a.id});n.onclick=()=>{window.focus();onOpen(a.tab);n.close()}})}catch{setError('Desktop notifications unavailable; in-app alerts remain active')}}}
+  list.forEach(a=>{const n=new Notification(a.title,{body:a.body,tag:'bharat-'+a.id});n.onclick=()=>{window.focus();onOpen(a.tab==='Event Calendar'?'Dashboard':a.tab);n.close()}})}catch{setError('Desktop notifications unavailable; in-app alerts remain active')}}}
  cursor=Math.max(cursor,newest);if(cursor)write('bharat-alert-cursor',cursor);
  // A first empty inbox still establishes a baseline for the next poll.
  if(!cursor)cursor=-1;
@@ -17,10 +17,10 @@ export function NotificationCenter({onOpen}){
  const enable=async()=>{if(desktop){setDesktop(false);write('bharat-desktop-alerts','off');return}if(!('Notification' in window)){setError('Browser does not support desktop notifications');return}try{const p=await Notification.requestPermission();setDesktop(p==='granted');write('bharat-desktop-alerts',p==='granted'?'on':'off');if(p!=='granted')setError('Desktop permission not granted; in-app notifications still work')}catch{setError('Could not enable desktop notifications')}};
  return e('section',{className:'panel',style:{padding:12,marginBottom:14}},e('button',{onClick:()=>setOpen(!open)},'🔔 Notifications · ',data.unread,' unread'),e('button',{onClick:enable},desktop?'Disable desktop alerts':'Enable desktop alerts'),
  error?e('p',{role:'alert'},error):null,
- toasts.length?e('div',{'aria-live':'polite'},...toasts.map(a=>e('div',{key:a.id,className:'notice'},e('strong',null,a.title),e('p',null,a.body),e('button',{onClick:()=>{onOpen(a.tab);setToasts(v=>v.filter(x=>x.id!==a.id))}},'Open ',a.tab),e('button',{onClick:()=>setToasts(v=>v.filter(x=>x.id!==a.id))},'Dismiss')))):null,
+ toasts.length?e('div',{'aria-live':'polite'},...toasts.map(a=>e('div',{key:a.id,className:'notice'},e('strong',null,a.title),e('p',null,a.body),e('button',{onClick:()=>{onOpen(a.tab==='Event Calendar'?'Dashboard':a.tab);setToasts(v=>v.filter(x=>x.id!==a.id))}},'Open ',a.tab==='Event Calendar'?'Dashboard':a.tab),e('button',{onClick:()=>setToasts(v=>v.filter(x=>x.id!==a.id))},'Dismiss')))):null,
  open?e('div',null,e('p',{className:'small muted'},'Research alerts, not executed trades. Historical alerts may no longer be valid; check the originating tab. Backend and browser must remain open for desktop pop-ups.'),
  e('button',{onClick:async()=>{try{await post('notifications/read',{through:data.alerts[0]?.id||0});setData({...data,unread:0,alerts:data.alerts.map(a=>({...a,seen:true}))});setToasts([])}catch(ex){setError(ex.message)}}},'Mark all read'),
- ...data.alerts.map(a=>e('details',{key:a.id},e('summary',null,a.seen?'':'● ',a.title,' · ',stamp(a.created),' IST'),e('p',null,a.body),a.url?e('a',{href:a.url,target:'_blank',rel:'noopener noreferrer'},'Original source'):null,e('button',{onClick:()=>onOpen(a.tab)},'Open ',a.tab)))):null);
+ ...data.alerts.map(a=>e('details',{key:a.id},e('summary',null,a.seen?'':'● ',a.title,' · ',stamp(a.created),' IST'),e('p',null,a.body),a.url?e('a',{href:a.url,target:'_blank',rel:'noopener noreferrer'},'Original source'):null,e('button',{onClick:()=>onOpen(a.tab==='Event Calendar'?'Dashboard':a.tab)},'Open ',a.tab==='Event Calendar'?'Dashboard':a.tab)))):null);
 }
 export function EventCalendar({data,onRefresh}){
  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[filter,setFilter]=useState(''),[date,setDate]=useState('');

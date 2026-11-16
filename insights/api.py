@@ -14,6 +14,8 @@ def create_app(service=None):
     app.config.update(MAX_CONTENT_LENGTH=2_100_000,JSON_SORT_KEYS=False)
     service=service or InsightsService()
     app.extensions['insights_service']=service
+    from insights.app_controls import register
+    register(app)
     @app.before_request
     def limit_requests():
         # Only the CSV import needs a larger body than existing endpoints.

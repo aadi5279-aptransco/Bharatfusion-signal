@@ -10,11 +10,11 @@ import QGLPPanel from './qglp.js';
 import TrendMeter from './trend_meter.js';
 import PremarketFollowthrough from './premarket_followthrough.js';
 import IndexScanStatus from './index_scan_status.js';
-import {EventCalendar,NotificationCenter} from './event_center.js';
+import {NotificationCenter} from './event_center.js';
 const e=React.createElement;
 const RISK='Rule-based analytics, not investment advice. Entries and targets are not guaranteed. Trading carries risk of loss. No orders are placed.';
-const tabs=[['Event Calendar','▣'],['Dashboard','▦'],['Scanner','▤'],['Positional','◈'],['Analyse','⌕'],['Pre-Market 8 AM','☼'],['Intraday','↗'],['BTST','◷'],['FII Stock Deals','⇄'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
-const route={'Event Calendar':'event-calendar','Scanner':'scanner','Positional':'positional','Dashboard':'dashboard','Analyse':'analyse','Pre-Market 8 AM':'pre-market','Intraday':'intraday','BTST':'btst','FII Stock Deals':'fii-stock-deals','Index Options':'index-options','F&O Stocks':'fo-stocks','Swing Trades':'swing-trades','Multibagger':'multibagger','Track Record':'track-record'};
+const tabs=[['Dashboard','▦'],['Scanner','▤'],['Positional','◈'],['Analyse','⌕'],['Pre-Market 8 AM','☼'],['Intraday','↗'],['BTST','◷'],['FII Stock Deals','⇄'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
+const route={'Scanner':'scanner','Positional':'positional','Dashboard':'dashboard','Analyse':'analyse','Pre-Market 8 AM':'pre-market','Intraday':'intraday','BTST':'btst','FII Stock Deals':'fii-stock-deals','Index Options':'index-options','F&O Stocks':'fo-stocks','Swing Trades':'swing-trades','Multibagger':'multibagger','Track Record':'track-record'};
 async function api(url,options={}){const res=await fetch(url,{...options,headers:{Accept:'application/json',...(options.headers||{})},cache:'no-store'});const body=await res.json();if(!res.ok)throw Error(body.error||`HTTP ${res.status}`);return body;}
 function Text({children,muted=false}){return e('span',{className:muted?'muted':''},children);}
 function Badge({children,type=''}){return e('span',{className:`badge ${type}`},children);}
@@ -932,12 +932,20 @@ function MultibaggerResearch({data}) {
      cards.length?e('div',{className:'research-candidates'},...cards):e('div',{className:'empty'},'No candidates to show yet.')));
 }
 function App(){
+ const [exitState,setExitState]=useState('idle');const [exitError,setExitError]=useState('');
+ const onExit=async()=>{
+  if(exitState!=='idle'||!window.confirm('Exit BharatSignal and stop all background scans? Start it again with START_INSIGHTS.bat.'))return;
+  setExitState('busy');setExitError('');
+  try{const c=await api('/api/v1/app/control');if(!c.can_exit)throw Error('Exit needs the updated launcher. Restart the application once after installing this update.');
+   await api('/api/v1/app/exit',{method:'POST',headers:{'X-App-Control':c.token}});setExitState('requested');
+  }catch(ex){setExitError(ex.message);setExitState('idle');}
+ };
  const [active,setActive]=useState('Dashboard');const [theme,setTheme]=useState(localStorage.getItem('bharat-theme')||'dark');
  const [health,setHealth]=useState({status:'Connecting…',read_only:true});const [data,setData]=useState({});const [busy,setBusy]=useState(false);const [error,setError]=useState('');
  const [refreshBusy,setRefreshBusy]=useState(false);const [refreshError,setRefreshError]=useState('');
  useEffect(()=>{document.documentElement.dataset.theme=theme;localStorage.setItem('bharat-theme',theme);},[theme]);
- useEffect(()=>{let alive=true;const load=async()=>{try{const h=await api('/api/v1/health');if(alive)setHealth(h);}catch{if(alive)setHealth({status:'OFFLINE',read_only:true});}};load();const id=setInterval(load,15000);return()=>{alive=false;clearInterval(id);};},[]);
- useEffect(()=>{if(active==='Analyse'||active==='Scanner'||active==='Positional')return;let alive=true;const load=async()=>{try{const d=await api('/api/v1/market-insights/'+route[active]);if(alive){setData(d);setError('');}}catch(ex){if(alive)setError(ex.message);}};load();const id=setInterval(load,20000);return()=>{alive=false;clearInterval(id);};},[active]);
+ useEffect(()=>{if(exitState==='requested')return;let alive=true;const load=async()=>{try{const h=await api('/api/v1/health');if(alive)setHealth(h);}catch{if(alive)setHealth({status:'OFFLINE',read_only:true});}};load();const id=setInterval(load,15000);return()=>{alive=false;clearInterval(id);};},[exitState]);
+ useEffect(()=>{if(exitState==='requested'||active==='Analyse'||active==='Scanner'||active==='Positional')return;let alive=true;const load=async()=>{try{const d=await api('/api/v1/market-insights/'+route[active]);if(alive){setData(d);setError('');}}catch(ex){if(alive)setError(ex.message);}};load();const id=setInterval(load,20000);return()=>{alive=false;clearInterval(id);};},[active,exitState]);
  const onRefresh=async()=>{
   if(refreshBusy)return;
   setRefreshBusy(true);setRefreshError('');
@@ -949,7 +957,7 @@ function App(){
   }
  };
  useEffect(()=>{
-  if(!refreshBusy)return;
+  if(!refreshBusy||exitState==='requested')return;
   let alive=true;
   const poll=async()=>{
    try {
@@ -966,9 +974,10 @@ function App(){
   };
   poll();const id=setInterval(poll,2500);
   return()=>{alive=false;clearInterval(id);};
- },[refreshBusy,active]);
+ },[refreshBusy,active,exitState]);
  const onSearch=async(symbol,expiry)=>{setBusy(true);setError('');try{setData(await api('/api/v1/market-insights/analyse?symbol='+encodeURIComponent(symbol.trim())+(expiry?'&expiry='+encodeURIComponent(expiry):'')));}catch(ex){setData({});setError(ex.message);}finally{setBusy(false);}};
- const select=label=>{setActive(label);setError('');setData({});};
+ const select=label=>{setActive(route[label]?label:'Dashboard');setError('');setData({});};
+ if(exitState==='requested')return e('main',{className:'content'},e('section',{className:'panel',style:{padding:32}},e('h1',null,'Exit requested'),e('p',null,'BharatSignal is shutting down its local server and background scans. You can close this browser tab.'),e('p',null,'To open it again, double-click START_INSIGHTS.bat. Your settings and saved data are retained.')));
  return e('div',{className:'shell'},
   e('aside',{className:'sidebar'},e('div',{className:'brand'},e('div',{className:'brand-icon'},'B'),e('div',null,e('strong',null,'BHARATSIGNAL'),e('small',null,'FUSION · PRO'))),
    e('div',{className:'nav-caption'},'WORKSPACE'),e('div',{className:'nav-caption subtle'},'MARKET INSIGHTS'),
@@ -976,9 +985,8 @@ function App(){
    e('div',{className:'sidebar-bottom'},e('span',{className:'dot '+(health.status==='CONNECTED'?'green':'amber')}),e('span',null,health.status||'Waiting'),e('p',null,'Local only · Read-only'))),
   e('div',{className:'workspace'},
    e('header',{className:'topbar'},e('div',null,e('small',{className:'muted'},'BHARATSIGNAL / MARKET INSIGHTS'),e('h1',null,active)),
-    e('div',{className:'top-actions'},e(Badge,{type:'positive'},'NO ORDER PLACEMENT'),e(Badge,null,'DHAN · '+health.status),e('button',{className:'theme-btn',onClick:()=>setTheme(theme==='dark'?'light':'dark')},theme==='dark'?'☀ Light':'☾ Dark'))),
-   e('main',{className:'content'},e(NotificationCenter,{onOpen:select}),e(Notice,{warning:true},RISK),
-    active==='Event Calendar'?e(EventCalendar,{data,onRefresh:async()=>{try{setData(await api('/api/v1/market-insights/event-calendar'))}catch(ex){setError(ex.message)}}}):null,
+    e('div',{className:'top-actions'},e(Badge,{type:'positive'},'NO ORDER PLACEMENT'),e(Badge,null,'DHAN · '+health.status),e('button',{className:'theme-btn',onClick:()=>setTheme(theme==='dark'?'light':'dark')},theme==='dark'?'☀ Light':'☾ Dark'),e('button',{className:'theme-btn',onClick:onExit,disabled:exitState==='busy',title:'Stop the local app and background scans'},exitState==='busy'?'Exiting…':'Logout / Exit'))),
+   e('main',{className:'content'},exitError?e(Notice,{warning:true},exitError):null,e(NotificationCenter,{onOpen:select}),e(Notice,{warning:true},RISK),
     error?e(Notice,{warning:true},error):null,
     ['Intraday','F&O Stocks','Swing Trades'].includes(active)?e(Section,{title:'Scheduled liquidity shortlist'},
      e('p',null,'Broad discovery: 09:45, 10:00, 11:00, 12:00, 13:00, 14:00, 15:00 IST. Strategy checks: every 5 minutes on stored selections only.'),
