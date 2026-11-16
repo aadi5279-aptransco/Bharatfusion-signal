@@ -20,6 +20,7 @@ from insights.premarket_followthrough import PremarketFollowthrough
 from insights.liquidity_shortlist import LiquidityShortlist, key as liquidity_key
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
+from insights.dashboard_trend import dashboard_trend
 from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
@@ -212,6 +213,10 @@ class InsightsService:
         for item in items:
             try:
                 f=self.broker.history(item,now,minutes=5)
+                f=f.copy()
+                f.index=pd.DatetimeIndex(f.index)
+                f.index=f.index.tz_localize(IST) if f.index.tz is None else f.index.tz_convert(IST)
+                f=f.sort_index()
                 # Defence in depth: never score a candle which hasn't finished yet.
                 f=f[f.index+pd.Timedelta(minutes=5)<=pd.Timestamp(now)]
                 if f.empty:continue
@@ -223,6 +228,9 @@ class InsightsService:
                               asof=last.isoformat())
                 if item['kind']=='index':
                     result=index_bias(f,item['symbol']);result.update(metadata)
+                    result['trend']=dashboard_trend(f)
+                    result['session_points']=round(float(session.close.iloc[-1])-float(session.open.iloc[0]),2)
+                    result['not_live']=(last.date()!=now.date() or not is_market_session(now,_holiday_set()) or (pd.Timestamp(now)-last).total_seconds()>900)
                     indices.append(result)
                     if _norm(item['symbol']) in ('BANKNIFTY','NIFTYBANK'):
                         sectors.append(dict(symbol=item['symbol'],sector='Bank',**metadata))

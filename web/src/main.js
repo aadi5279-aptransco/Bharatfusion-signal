@@ -202,15 +202,15 @@ function Dashboard({data,onRefresh,refreshBusy,refreshState,refreshError}){
   refreshError?e(Notice,{warning:true},refreshError):null,
   refreshState?.status==='NO_DATA'||refreshState?.status==='FAILED'?e(Notice,{warning:true},refreshState.message||'Market data unavailable.'):null,
   data.not_live&&data.data_asof?e(Notice,{warning:true},'HISTORICAL SNAPSHOT — NOT LIVE. Bias and changes refer to the completed session dated '+lastSession+'. Do not use these as live entry signals.'):null,
-  e('div',{className:'trend-meter-grid'},...(indices.length?indices:[{symbol:'NIFTY 50'},{symbol:'SENSEX'}]).map(x=>e(TrendMeter,{key:x.symbol,title:x.symbol+' TREND',bias:x.bias,score:x.score,asof:x.asof||data.data_asof,historical:!!data.not_live}))),
+  e('div',{className:'trend-meter-grid'},...(indices.length?indices:[{symbol:'NIFTY 50'},{symbol:'SENSEX'}]).map(x=>e(TrendMeter,{key:x.symbol,title:x.symbol+' TREND',bias:(x.trend||x).bias,score:(x.trend||x).score,sessionPoints:x.session_points,sessionChange:x.session_change,asof:x.asof||data.data_asof,historical:!!(x.not_live??data.not_live)}))),
   e('div',{className:'tile-grid trend-meter-summary'},e(Tile,{title:'SECTORS AVAILABLE',value:sectors.length,sub:'Dhan sector indices'}),e(Tile,{title:'MARKET DATA',value:data.status||'No connection',sub:data.updated_at||'Not updated'})),
   e(EuropeMarketsPanel),
   e(ParticipantPositioning),
   e('div',{className:'split'},
    e(Section,{title:'Index bias & underlying rules'},indices.length?indices.map((x,i)=>e('div',{className:'bias',key:i},
-    e('div',{className:'bias-head'},e('b',null,x.symbol),e(Badge,{type:x.bias==='Uptrend'?'positive':x.bias==='Downtrend'?'negative':''},x.bias),e(Text,{muted:true},`Score ${x.score??'N/A'}`)),
-    e('ul',{className:'reasons'},...(x.reasons||[]).map((r,k)=>e('li',{key:k},r))),
-    (x.warnings||[]).length?e('p',{className:'small muted'},x.warnings.join(' · ')):null)):e('p',{className:'muted'},'Connect Dhan and provide current completed index candles to calculate bias.')),
+    e('div',{className:'bias-head'},e('b',null,x.symbol),e(Badge,{type:(x.trend||x).bias==='Uptrend'?'positive':(x.trend||x).bias==='Downtrend'?'negative':''},(x.trend||x).bias),e(Text,{muted:true},`Score ${(x.trend||x).score??'N/A'}`)),
+    e('ul',{className:'reasons'},...((x.trend||x).reasons||[]).map((r,k)=>e('li',{key:k},r))),
+    ((x.trend||x).warnings||[]).length?e('p',{className:'small muted'},(x.trend||x).warnings.join(' · ')):null)):e('p',{className:'muted'},'Connect Dhan and provide current completed index candles to calculate bias.')),
    e(Section,{title:'Sector momentum heatmap'},sectors.length?e('div',{className:'heatmap'},sectors.map((s,i)=>e('div',{className:'heat',key:i,style:{background:s.session_change>=0?'var(--heat-green)':'var(--heat-red)'}},e('b',null,s.sector),e('strong',null,`${s.session_change>0?'+':''}${s.session_change}%`),e('small',null,`vs NIFTY ${s.relative_strength??'—'}%`)))):e('div',{className:'empty'},'Sector data unavailable. Rankings will appear only when Dhan provides verified sector candles.'))));
 }
 function AnalyseChooser({onSelect,busy}){
