@@ -249,9 +249,9 @@ function AnalyseChooser({onSelect,busy}){
     'Manual F&O stock: type the Dhan stock name or exchange ticker in the search box below. Start typing to see mapped symbols.'));
 }
 function AnalyseATM({data}){
- const atm=data.atm_recommendation||{},contract=atm.contract;
+ const atm=data.smc_atm||data.atm_recommendation||{},contract=atm.contract;
  const levels=atm.entry!=null&&atm.sl!=null&&atm.t1!=null&&atm.t2!=null;
- return e(Section,{title:'ATM CE/PE option recommendation · research only'},
+ return e(Section,{title:'SMC expert model · ATM option research'},
   e('div',{className:'tile-grid'},
     e(Tile,{title:'ATM STRIKE',value:atm.atm_strike==null?'—':price(atm.atm_strike),
       sub:contract?.expiry?'Expiry '+contract.expiry:'Expiry '+(data.expiry||'not verified')}),
@@ -282,6 +282,16 @@ function AnalyseEvidence({data}){
  const a=data.analysis||{},mtf=a.mtf||{},plan=data.entry_plan;
  return e('div',null,
   e(AnalyseATM,{data}),
+  data.smc_model?e(Section,{title:'Built-in SMC expert model — evidence and blockers'},
+    e('p',{className:'small muted'},'Explainable rule-based expert system · not a trained ML model · no calibrated win probability'),
+    e('p',null,`State: ${data.smc_model.status} · Confluence: ${data.smc_model.score??'—'}/100`),
+    e('ul',null,...(data.smc_model.reasons||[]).map((r,i)=>e('li',{key:i},r))),
+    ...(data.smc_model.blockers||[]).map((r,i)=>e(Notice,{key:i,warning:true},r)),
+    ...Object.entries(data.smc_model.patterns||{}).map(([side,p])=>e('details',{key:side},e('summary',null,side+' structural evidence'),
+      e('p',null,`BOS: ${p.bos} · CHoCH: ${p.choch} · Sweep: ${p.liquidity_sweep} · Displacement: ${p.displacement} · FVG retest: ${p.fvg_retest} · Range: ${p.range_location}`),
+      e('p',null,'Confirmed swing high ',price(p.swing_high),' / low ',price(p.swing_low)),
+      e('p',null,p.order_block?`Order-block proxy ${price(p.order_block.low)}–${price(p.order_block.high)}; retest not assumed`:'No new order-block proxy'),
+      ...p.active_fvgs.map((z,i)=>e('p',{key:i},`Active FVG ${price(z.low)}–${price(z.high)} · Retested: ${z.retested}`))))) :null,
   e('div',{className:'tile-grid'},
     e(Tile,{title:'DIRECTION',value:data.bias||'UNAVAILABLE'}),
     e(Tile,{title:'SETUP SCORE',value:a.score??'—',sub:'Heuristic, not probability'}),

@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime
 from insights.config import IST, is_market_session
 from insights.brokers.dhan import BrokerUnavailable
-from insights import analyse_engine,atm_recommendation
+from insights import analyse_engine,atm_recommendation,smc_expert
 from insights.strategies import options
 
 
@@ -106,6 +106,22 @@ def analyse(service,symbol,now,expiry,calendar,normalize):
     bias=evidence['bias']
     atm=atm_recommendation.evaluate(chain,selected,item['symbol'],now,calendar,
           bias=bias,five=frames.get(5),requested_side=requested_side)
+    model=smc_expert.evaluate(frames,chain,metrics,item,selected,now,calendar,requested_side)
+    if model['status']=='AWAITING OPTION CANDLES':
+        try:
+            contract=model['recommendation']['contract']
+            option_item=dict(symbol=contract['symbol'],id=contract['security_id'],kind='option',
+                segment='BSE_FNO' if item.get('segment')=='BSE_EQ' or normalize(item['symbol'])=='SENSEX' else 'NSE_FNO',
+                instrument='OPTIDX' if item.get('kind')=='index' else 'OPTSTK')
+            premium=service.broker.history(option_item,now,minutes=5,lookback_days=8)
+            model=smc_expert.premium_levels(model,premium,now)
+        except (BrokerUnavailable,ValueError,TypeError,KeyError,IndexError):
+            model['status']='WATCH';model['blockers'].append('ATM premium candle history missing, stale or unsuitable for structural SL')
+    model_quote=model.get('recommendation') or dict(atm,contract=None,bid=None,ask=None,spread_pct=None)
+    smc_atm=dict(model_quote,entry=None,sl=None,t1=None,t2=None,rr=None,status=model['status'],
+                 direction=model['direction'],signal_source=smc_expert.VERSION,
+                 reason='; '.join(model['blockers']) or '; '.join(model['reasons']))
+    if model['status']=='RESEARCH SCENARIO':smc_atm=model['recommendation']
     if chain and metrics is not None and (bias in ('BULLISH','BEARISH') or requested_side):
         direction=('Uptrend' if bias=='BULLISH' else
                    'Downtrend' if bias=='BEARISH' else 'Sideways')
@@ -116,7 +132,7 @@ def analyse(service,symbol,now,expiry,calendar,normalize):
     five=frames.get(5)
     return dict(symbol=item['symbol'],asset_type=item.get('kind'),
        expiry=selected,expiries=expiries[:15],metrics=metrics,plan=plan,
-       atm_recommendation=atm,
+       atm_recommendation=atm,smc_model=model,smc_atm=smc_atm,
        spot=chain.get('last_price') if chain else (
            float(five.close.iloc[-1]) if five is not None else None),
        candles=candles,
@@ -135,4 +151,5 @@ def analyse(service,symbol,now,expiry,calendar,normalize):
                else evidence['status']),
        history_errors=history_errors,
        note=note,
-       recommendation_status=atm['status'])
+       recommendation_status=smc_atm['status'])
+
