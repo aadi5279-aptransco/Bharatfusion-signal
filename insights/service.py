@@ -21,7 +21,7 @@ from insights.liquidity_shortlist import LiquidityShortlist, key as liquidity_ke
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
 from insights.dashboard_trend import dashboard_trend
-from insights import premarket_setups
+from insights import premarket_setups,fo_selection
 from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
@@ -1064,6 +1064,7 @@ class InsightsService:
         return signals
 
     def scan_fo(self,now):
+        now=now.astimezone(IST)
         signals=[];unavailable=0;fib_setups=[];opening_setups=[]
         selected=self.liquidity.selected('fo-stocks',now)
         picks=list(selected)
@@ -1087,6 +1088,7 @@ class InsightsService:
                 if s['direction']=='PE' and not smc['down_breakdown']:continue
                 h15=self.broker.history(item,now,minutes=15,lookback_days=12)
                 h60=self.broker.history(item,now,minutes=60,lookback_days=30)
+                if not recent_frame(h15,now,15,35) or not recent_frame(h60,now,60,125):continue
                 expected='UP' if s['direction']=='CE' else 'DOWN'
                 if advanced_smc.trend(h15)!=expected or advanced_smc.trend(h60)!=expected:continue
                 exps=self.broker.expiry_list(item)
@@ -1095,6 +1097,9 @@ class InsightsService:
                 chain=self.broker.option_chain(item,expiry)
                 plan=options.option_plan(chain,item['symbol'],'Uptrend' if s['direction']=='CE' else 'Downtrend',expiry,now,side_override=s['direction'])
                 if not plan:continue
+                quality=fo_selection.quality(plan,chain,smc,s)
+                if quality is None:continue
+                plan.update(quality)
                 plan.update(strategy=futures.NAME,version=futures.VERSION,
                    reasons=s['reasons']+plan['reasons'],backtest_status='UNVALIDATED',
                    status='HYPOTHETICAL — OPTION QUOTE AGE NOT VERIFIED',
@@ -1105,19 +1110,20 @@ class InsightsService:
                             choch_up=smc['choch_up'],choch_down=smc['choch_down'],
                             fvg_up=smc['fvg_up'],fvg_down=smc['fvg_down'],rvol=smc['rvol']),
                    order_flow_proxy='FUTURES OI BUILDUP + CHAIN OI; NOT TRADE DELTA')
-                # No journal record: option entry premiums are not timestamp-verified.
                 signals.append(cycle_wave.annotate(plan,five,now))
             except (BrokerUnavailable,ValueError,KeyError):unavailable+=1
-        phase='STORED LIQUIDITY SHORTLIST'
+        eligible=len(signals)
+        signals=fo_selection.top_eight(signals)
+        chosen={p['underlying'] for p in signals}
+        opening_setups=[r for r in opening_setups if r.get('underlying') in chosen]
+        fib_setups=[r for r in fib_setups if r.get('underlying') in chosen]
+        phase='TOP 8 QUALIFIED F&O RESEARCH PICKS'
         self._update('fo-stocks',dict(signals=signals,fib_setups=fib_setups,
               opening_setups=opening_setups,opening_ready=sum(x.get('state')=='DIRECTION_READY' for x in opening_setups),
-              status=(phase+' — LEGACY FUTURES SETUPS + SPOT WATCHES' if signals else
-                      phase+' — SPOT CE/PE WATCHES (PREMIUM UNVERIFIED)'
-                      if any(x.get('state')=='DIRECTION_READY' for x in opening_setups)
-                      else phase+' — NO CONFIRMED SPOT DIRECTION YET'),
+              status=f'{len(signals)}/8 QUALIFIED RESEARCH PICKS' if signals else 'NO F&O STOCKS PASS THE QUALITY FILTERS',
               phase=phase,scanned=len(picks),shortlisted=len(selected),shortlist_symbols=[x['symbol'] for x in selected],
-              unavailable_count=unavailable,qualified=len(signals),mtf='15m+60m+Futures OI',
-              note='Only stored liquid F&O underlyings are monitored; no full-universe fallback. Premium and quote age unverified.'),now)
+              unavailable_count=unavailable,qualified=len(signals),eligible_before_cap=eligible,selection_limit=8,minimum_selection_score=75,mtf='15m+60m+Futures OI',
+              note='At most 8 unique stocks, ranked by rule quality >=75/100; not a measured win rate. Requires futures OI, cash RVOL >=1.5, breakout, fresh 15m/60m trend agreement and option spread <=2%. Fewer appear when insufficient stocks qualify. Option quote age remains unverified; research scenarios only.'),now)
         return signals
 
     def reconcile_outcomes(self,now):
