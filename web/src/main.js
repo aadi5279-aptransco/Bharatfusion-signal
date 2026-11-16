@@ -8,6 +8,7 @@ import IndexOrderFlowPanel from './index_orderflow.js';
 import EuropeMarketsPanel from './europe_markets.js';
 import QGLPPanel from './qglp.js';
 import TrendMeter from './trend_meter.js';
+import PremarketFollowthrough from './premarket_followthrough.js';
 import {EventCalendar,NotificationCenter} from './event_center.js';
 const e=React.createElement;
 const RISK='Rule-based analytics, not investment advice. Entries and targets are not guaranteed. Trading carries risk of loss. No orders are placed.';
@@ -979,7 +980,7 @@ function App(){
     active==='Positional'?e(PositionalPanel):null,
     active==='Index Options'?e(IndexOrderFlowPanel):null,
     active==='Scanner'?e(ScannerPanel,{onAnalyse:symbol=>{select('Analyse');onSearch(symbol);}}):null,
-    active==='Pre-Market 8 AM'?e(PremarketWatch,{data}):null,
+    active==='Pre-Market 8 AM'?e(React.Fragment,null,e(PremarketWatch,{data}),e(PremarketFollowthrough)):null,
     active==='FII Stock Deals'?e(FIIStockDealsPanel):null,
     active==='Swing Trades'?e(SwingTrades,{data}):null,
     active==='Multibagger'?e(React.Fragment,null,e(QGLPPanel),e(MultibaggerResearch,{data})):null,
