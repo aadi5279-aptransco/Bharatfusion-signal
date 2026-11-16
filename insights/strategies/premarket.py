@@ -11,21 +11,9 @@ import pandas as pd
 VERSION="premarket-watch-v1"
 
 def evaluate(frame,symbol,now):
-    if frame is None or not isinstance(frame,pd.DataFrame) or len(frame)<55:
-        return None
-    if not isinstance(frame.index,pd.DatetimeIndex) or frame.index.tz is None or frame.index.has_duplicates:
-        return None
-    required={"open","high","low","close","volume"}
-    if not required.issubset(frame.columns):return None
-    t=pd.Timestamp(now)
-    if t.tzinfo is None:return None
-    f=frame.sort_index().copy()
-    f=f[f.index.date<t.date()] if (t.hour,t.minute)<(15,40) else f[f.index.date<=t.date()]
-    if len(f)<55:return None
-    try:f[list(required)]=f[list(required)].astype(float)
-    except (ValueError,TypeError):return None
-    if f[list(required)].isna().any().any() or not (f[["open","high","low","close"]]>0).all().all() or (f.volume<0).any():
-        return None
+    from insights.premarket_setups import prepare, evaluate as setup_evaluate
+    try: f=prepare(frame,now)
+    except (ValueError,TypeError): return None
     last=f.iloc[-1];prev=f.iloc[-2];price=float(last.close)
     if prev.close<=0:return None
     daily_change=100*(price/float(prev.close)-1)
@@ -58,7 +46,7 @@ def evaluate(frame,symbol,now):
                  "No confirmed 20-day closing breakout/breakdown",
                  "EMA20/EMA50 direction aligned" if aligned else "Daily trend not fully aligned",
                  "Prior-session volume {:.2f}x 20-day average".format(rvol) if rvol is not None else "Volume reference unavailable"],
-        data_source="COMPLETED LICENSED DAILY BARS",research_only=True)
+        data_source="COMPLETED LICENSED DAILY BARS",research_only=True,**setup_evaluate(f))
 
 
 def rank(items,asof,limit=10):
@@ -68,6 +56,8 @@ def rank(items,asof,limit=10):
         key=lambda x:(x["score"],x["previous_day_change_pct"]),reverse=True)[:limit]
     losers=sorted((x for x in valid if x["previous_day_change_pct"]<0),
         key=lambda x:(x["score"],-x["previous_day_change_pct"]),reverse=True)[:limit]
-    return dict(gainers=gainers,losers=losers,asof=asof,
+    candidates=sorted((x for x in valid if x.get("setups")),key=lambda x:(-x["setup_score"],x["symbol"]))[:12]
+    return dict(gainers=gainers,losers=losers,candidates=candidates,asof=asof,
         status="PRE-MARKET WATCH ONLY — NOT CONFIRMED LIVE",
         note="Ranks the mapped sampled universe using only the previous completed session, no future or 08:00 market candles. Strict intraday signals remain separate.")
+

@@ -72,6 +72,14 @@ def assess(five,daily,fifteen,item,now,holidays):
             try:accept(dict(strategy='Opening 15m range + vital confirmations',direction=side,reasons=['Two completed 5m closes beyond opening 15m '+('high' if side=='BUY' else 'low')],**risk_levels(last,x.atr,side,stop)))
             except ValueError:record('Opening 15m range '+side,'FILTERED','Risk distance unsuitable')
         else:record('Opening 15m range '+side,'NO MATCH','Waiting for two completed closes beyond range')
+    for side,level in [('BUY',float(d.high.iloc[-1])),('SELL',float(d.low.iloc[-1]))]:
+        confirmed=(last_two>level).all() if side=='BUY' else (last_two<level).all()
+        if confirmed:
+            try:
+                stop=min(level,last-float(x.atr)) if side=='BUY' else max(level,last+float(x.atr))
+                accept(dict(strategy='Prior-day range break + vital confirmations',direction=side,reasons=['Two completed 5m closes beyond prior-session '+('high' if side=='BUY' else 'low')],**risk_levels(last,x.atr,side,stop)))
+            except ValueError:record('Prior-day range '+side,'FILTERED','Risk distance unsuitable')
+        else:record('Prior-day range '+side,'NO MATCH','Waiting for two completed closes beyond prior-day range')
     # Existing longer-term strategies remain context; do not relabel their horizons as intraday trades.
     for name,fn in [('Daily swing',lambda:swing.scan(d,symbol,now)),('Swing opportunities',lambda:swing_opportunities.evaluate(d,symbol,now)),('Swing guide',lambda:swing_guide.evaluate(d,symbol,now)),('Positional daily templates',lambda:daily_setups(d,item,now,holidays)[0]),('R1/S1 Supertrend',lambda:r1_setups(d,f,item,now,holidays)),('Gann / wave context',lambda:swing_gann_wave.assess(d,now))]:
         try:
@@ -103,7 +111,7 @@ class PremarketFollowthrough:
     def freeze(self,now):
         if self.state.get('session')==now.date().isoformat():return bool(self.state.get('symbols'))
         p=self.service.snapshot('pre-market');prior=prior_session(now,self.holidays())
-        rows=p.get('gainers',[])+p.get('losers',[])
+        rows=p.get('candidates',[])+p.get('gainers',[])+p.get('losers',[])
         if p.get('mixed_data_dates') or p.get('previous_session')!=prior.isoformat() or not rows:self.error='Waiting for verified previous-session pre-market list';return False
         self.state=dict(session=now.date().isoformat(),symbols=list(dict.fromkeys(r['symbol'] for r in rows)),passes={},frozen_at=now.isoformat());self.daily={};self.error='';self.save();return True
     def run_due(self,now):
