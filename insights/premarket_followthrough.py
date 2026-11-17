@@ -1,4 +1,4 @@
-"""Fixed pre-market watchlist: completed-candle checks at 09:45 and 10:00 IST."""
+"""Dated pre-market watchlist and five-minute completed-candle follow-through."""
 import json,math,threading,time
 from datetime import datetime,timedelta
 from pathlib import Path
@@ -9,7 +9,11 @@ from insights.strategies import opening_redbar,momentum_query,fib_smc,swing,swin
 from insights.positional import daily_setups,r1_setups
 from insights import swing_gann_wave
 
-SLOTS=((9,45),(10,0))
+def completed_session(now,holidays):
+    now=now.astimezone(IST)
+    if is_market_session(now.replace(hour=10,minute=0),holidays) and (now.hour,now.minute)>=(15,40):return now.date()
+    return prior_session(now,holidays)
+
 def prior_session(now,holidays):
     day=now-timedelta(days=1)
     for _ in range(15):
@@ -27,6 +31,7 @@ def assess(five,daily,fifteen,item,now,holidays):
     f=completed(five,now,5);f15=completed(fifteen,now,15)
     d=clean_bars(daily)
     if not isinstance(d.index,pd.DatetimeIndex) or d.index.tz is None:raise ValueError('Dated daily history required')
+    d.index=d.index.tz_convert(IST)
     d=d[d.index.date<now.date()]
     if d.empty or d.index[-1].date()!=prior_session(now,holidays):raise ValueError('Previous-session daily history missing')
     today=f[f.index.date==now.date()]
@@ -67,7 +72,7 @@ def assess(five,daily,fifteen,item,now,holidays):
     first=today.iloc[:3];last_two=today.close.tail(2)
     for side,level in [('BUY',float(first.high.max())),('SELL',float(first.low.min()))]:
         broken=(last_two>level).all() if side=='BUY' else (last_two<level).all()
-        if len(today)>=6 and broken:
+        if len(today)>=5 and broken:
             stop=min(float(today.low.tail(3).min()),last-float(x.atr)) if side=='BUY' else max(float(today.high.tail(3).max()),last+float(x.atr))
             try:accept(dict(strategy='Opening 15m range + vital confirmations',direction=side,reasons=['Two completed 5m closes beyond opening 15m '+('high' if side=='BUY' else 'low')],**risk_levels(last,x.atr,side,stop)))
             except ValueError:record('Opening 15m range '+side,'FILTERED','Risk distance unsuitable')
@@ -111,16 +116,19 @@ class PremarketFollowthrough:
     def freeze(self,now):
         if self.state.get('session')==now.date().isoformat():return bool(self.state.get('symbols'))
         p=self.service.snapshot('pre-market');prior=prior_session(now,self.holidays())
+        if p.get('previous_session')!=prior.isoformat():
+            try:p=json.loads((self.service.root/'premarket_archive'/f'{prior.isoformat()}.json').read_text(encoding='utf-8'))
+            except (OSError,ValueError):pass
         rows=p.get('candidates',[])+p.get('gainers',[])+p.get('losers',[])
         if p.get('mixed_data_dates') or p.get('previous_session')!=prior.isoformat() or not rows:self.error='Waiting for verified previous-session pre-market list';return False
         self.state=dict(session=now.date().isoformat(),symbols=list(dict.fromkeys(r['symbol'] for r in rows)),passes={},frozen_at=now.isoformat());self.daily={};self.error='';self.save();return True
     def run_due(self,now):
         now=now.astimezone(IST)
-        if not is_market_session(now,self.holidays()) or (now.hour,now.minute)>=(10,15):return
+        if not is_market_session(now,self.holidays()) or (now.hour,now.minute)>=(15,30):return
         with self.lock:
             if not self.freeze(now):return
         # Cache daily history once after 09:15, on the frozen symbols only.
-        if (now.hour,now.minute)<(9,45):
+        if (now.hour,now.minute)<(9,30):
             for symbol in list(self.state['symbols']):
                 if self.stop_event.is_set():return
                 if symbol in self.daily:continue
@@ -129,20 +137,26 @@ class PremarketFollowthrough:
                     if item:self.daily[symbol]=self.call(lambda:self.service.broker.daily(item,now,days=1300))
                 except Exception:continue
             return
-        clock='10:00' if (now.hour,now.minute)>=(10,0) else '09:45'
+        clock=f'{now.hour:02d}:{(now.minute//5)*5:02d}'
         with self.lock:
             cutoff=now.replace(hour=int(clock[:2]),minute=int(clock[3:]),second=0,microsecond=0)
             result=self.state['passes'].get(clock)
             if result:
                 pending=[r['symbol'] for r in result['rows'] if r.get('status')=='DATA UNAVAILABLE']
-                if not pending or result.get('attempts',1)>=3 or (now-cutoff).total_seconds()>480:return
+                if not pending or result.get('attempts',1)>=3 or (now-cutoff).total_seconds()>=300:return
                 result['status']='RUNNING';result['attempts']=result.get('attempts',1)+1
             else:
                 pending=list(self.state['symbols'])
                 result=dict(status='RUNNING',cutoff=cutoff.isoformat(),started_at=now.isoformat(),rows=[],signals=[],attempts=1)
                 self.state['passes'][clock]=result
+        deadline=time.monotonic()+240
         for symbol in pending:
-            if self.stop_event.is_set():break
+            if self.stop_event.is_set() or time.monotonic()>=deadline:
+                with self.lock:
+                    for left in pending[pending.index(symbol):]:
+                        result['rows']=[r for r in result['rows'] if r['symbol']!=left]+[dict(symbol=left,status='DATA UNAVAILABLE',reason='Cycle time budget exhausted; retry on next check',checks=[],context=[],signals=[])]
+                    result['signals']=[p for r in result['rows'] for p in r['signals']]
+                break
             try:
                 item=self.call(lambda:self.service._lookup(symbol))
                 if not item:raise ValueError('Instrument mapping unavailable')
@@ -156,14 +170,18 @@ class PremarketFollowthrough:
                 result['rows']=[r for r in result['rows'] if r['symbol']!=symbol]+[row]
                 result['signals']=[p for r in result['rows'] for p in r['signals']]
         with self.lock:
+            result['coverage']=dict(selected=len(self.state['symbols']),assessed=sum(r.get('status')!='DATA UNAVAILABLE' for r in result['rows']),unavailable=sum(r.get('status')=='DATA UNAVAILABLE' for r in result['rows']))
             result['status']='COMPLETE';result['updated_at']=datetime.now(IST).isoformat();self.save()
     def snapshot(self,now=None):
         now=now or datetime.now(IST)
         with self.lock:state=json.loads(json.dumps(self.state));state['error']=self.error
         for result in state.get('passes',{}).values():
-            cutoff=datetime.fromisoformat(result['cutoff']);result['historical']=(now-cutoff).total_seconds()>600 or cutoff.date()!=now.date() or not is_market_session(now,self.holidays())
-        latest=state.get('passes',{}).get('10:00') or state.get('passes',{}).get('09:45') or {}
+            cutoff=datetime.fromisoformat(result['cutoff']);result['historical']=not 0<=(now-cutoff).total_seconds()<=600 or cutoff.date()!=now.date() or not is_market_session(now,self.holidays())
+        latest=max(state.get('passes',{}).values(),key=lambda x:x.get('cutoff',''),default={})
         state.update(signals=latest.get('signals',[]) if not latest.get('historical',True) and latest.get('status')=='COMPLETE' else [],updated_at=latest.get('updated_at'),stale=latest.get('historical',True))
+        state['latest']=latest
+        state['buy_signals']=[r for r in state['signals'] if r.get('direction')=='BUY']
+        state['sell_signals']=[r for r in state['signals'] if r.get('direction')=='SELL']
         return state
     def start(self):
         if self.thread and self.thread.is_alive():return

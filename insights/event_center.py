@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS alerts(seq INTEGER PRIMARY KEY AUTOINCREMENT,uid TEXT
                     levels=' · '.join(k.upper()+' '+str(v) for k,v in vals.items() if isinstance(v,(int,float)) and math.isfinite(v))
                     reason=r.get('reason') or '; '.join(map(str,r.get('reasons') or []))
                     body=f'{strategy} · {side} · {levels} · {reason} · {r.get("status",r.get("state","Research only"))}. Check source tab freshness; no order placed.'
-                    if module in ('index-options','fo-stocks'):body+=' Watch levels are underlying prices; legacy premium quote age may be unverified.'
+                    if module in ('index-options','fo-stocks') and r.get('level_basis')!='OPTION PREMIUM':body+=' Watch levels are underlying prices; legacy premium quote age may be unverified.'
                     uid=digest('setup',day,module,symbol,strategy,side,r.get('expiry'),r.get('strike'))
                     self.publish(uid,f'{label} — {symbol} — {kind} setup',body,'BTST' if module=='btst-closing' else label,kind,now)
             except Exception:continue # One source cannot prevent the other alerts or the scans.

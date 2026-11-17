@@ -1,3 +1,4 @@
+from pathlib import Path
 """08:00 previous-session stock watchlist, causal daily data and scheduling."""
 import tempfile
 import unittest
@@ -55,16 +56,16 @@ class PreMarketTests(unittest.TestCase):
             self.assertEqual(out['gainers'][0]['symbol'],'GAIN')
             self.assertEqual(out['losers'][0]['symbol'],'LOSS')
             self.assertEqual(svc.journal.signals(),[])
-    def test_premarket_schedules_at_8_not_weekends(self):
+    def test_premarket_schedules_overnight_and_weekends(self):
         with tempfile.TemporaryDirectory() as folder:
             svc=InsightsService(MockDailyBroker(),folder)
             svc.scan_premarket=Mock(return_value=dict(assessed=2))
             with patch('insights.service._holiday_set',return_value=set()):
-                self.assertIn('BLOCKED',svc.run_due(datetime(2026,11,13,7,59,tzinfo=IST))['status'])
+                self.assertIn('OFF-HOURS',svc.run_due(datetime(2026,11,13,7,59,tzinfo=IST))['status'])
                 self.assertEqual(svc.run_due(datetime(2026,11,13,8,0,tzinfo=IST))['status'],'PRE-MARKET WATCHLIST COMPLETE')
                 self.assertEqual(svc.run_due(datetime(2026,11,13,8,5,tzinfo=IST))['status'],'PRE-MARKET WATCHLIST ALREADY COMPLETE')
-                self.assertIn('BLOCKED',svc.run_due(datetime(2026,11,14,8,0,tzinfo=IST))['status'])
-            svc.scan_premarket.assert_called_once()
+                self.assertIn('OFF-HOURS',svc.run_due(datetime(2026,11,14,8,0,tzinfo=IST))['status'])
+            self.assertEqual(svc.scan_premarket.call_count,3)
     def test_after_close_cache_reloads_at_8am_without_requery(self):
         with tempfile.TemporaryDirectory() as folder:
             end=datetime(2026,11,12,16,0,tzinfo=IST)
@@ -72,6 +73,7 @@ class PreMarketTests(unittest.TestCase):
             with patch('insights.service._holiday_set',return_value=set()):
                 prepared=first.scan_premarket(end)
                 self.assertEqual(prepared['previous_session'],'2026-11-12')
+                self.assertTrue((Path(folder)/'premarket_archive'/'2026-11-12.json').is_file())
                 restored=InsightsService(MockDailyBroker(),folder)
                 self.assertEqual(restored.snapshot('pre-market')['assessed'],2)
                 restored.scan_premarket=Mock()
@@ -88,3 +90,4 @@ class PreMarketTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+

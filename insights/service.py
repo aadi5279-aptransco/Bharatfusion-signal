@@ -17,12 +17,12 @@ from insights.orderflow import IndexOrderFlow
 from insights.europe_markets import EuropeMarkets
 from insights.qglp import QGLPResearch
 from insights.event_center import EventCenter
-from insights.premarket_followthrough import PremarketFollowthrough,prior_session
+from insights.premarket_followthrough import PremarketFollowthrough,prior_session,completed_session
 from insights.liquidity_shortlist import LiquidityShortlist, key as liquidity_key
 from insights.brokers.dhan import DhanReadOnly,BrokerUnavailable
 from insights.indicators import index_bias
 from insights.dashboard_trend import dashboard_trend
-from insights import premarket_setups,fo_selection
+from insights import premarket_setups,fo_selection,index_premium
 from insights.strategies import equity,options,futures
 from insights.scanner_quality import recent_frame,recent_context
 from insights import advanced_smc
@@ -784,10 +784,10 @@ class InsightsService:
         return result
 
     def scan_premarket(self,now):
-        """One 08:00 IST previous-session stock watchlist, never trade signals.
+        """Dated latest-completed-session stock watchlist, never trade signals.
 
         No current-session quotes or future daily candle is used. Run on
-        eligible market mornings only; bounded universe and no intraday
+        after hours or before open; bounded universe and no intraday
         scanner cap changes. Results persist in read-only snapshot memory.
         """
         now=now.astimezone(IST)
@@ -802,7 +802,7 @@ class InsightsService:
         # F&O stock universe is small enough for near-complete coverage.
         universe=sorted(all_stocks,key=lambda x:_norm(x['symbol']))[:maximum]
         rows=[];unavailable=0;short=0;stale=0;audit=[]
-        expected=now.date() if (now.hour,now.minute)>=(15,40) else prior_session(now,_holiday_set())
+        expected=completed_session(now,_holiday_set())
         for item in universe:
             try:
                 daily=premarket_setups.fetch_daily(self.broker,item,now)
@@ -829,7 +829,8 @@ class InsightsService:
             coverage_pct=round(100*len(rows)/len(universe),1) if universe else 0,
             previous_session=max(dates) if dates else None,
             mixed_data_dates=len(dates)>1,
-            status='08:00 PRIOR-SESSION WATCHLIST — NOT A TRADE' if rows
+            watchlist_date=expected.isoformat(),
+            status='SAVED COMPLETED-SESSION WATCHLIST — NOT A TRADE' if rows
                  else 'NO VERIFIED PRIOR-SESSION WATCHLIST DATA',
             note='Setup candidates require liquidity and compression or volume-confirmed breaks. Prior-day momentum ranks remain separate. Watch levels are not entries; live confirmation is required.')
         self._update('pre-market',payload,now)
@@ -840,6 +841,11 @@ class InsightsService:
             temp.write_text(json.dumps(self.snapshot('pre-market'),
                 ensure_ascii=False,allow_nan=False),encoding='utf-8')
             temp.replace(self._premarket_path)
+            if rows and not payload['mixed_data_dates']:
+                archive=self.root/'premarket_archive';archive.mkdir(parents=True,exist_ok=True)
+                target=archive/(expected.isoformat()+'.json')
+                saved=archive/(expected.isoformat()+'.tmp')
+                saved.write_text(json.dumps(self.snapshot('pre-market'),ensure_ascii=False,allow_nan=False),encoding='utf-8');saved.replace(target)
         except (OSError,ValueError,TypeError):
             pass
         return payload
@@ -984,7 +990,7 @@ class InsightsService:
 
     def scan_index_options(self,now):
         now=now.astimezone(IST)
-        d=self.snapshot('dashboard');indices=d.get('indices',[]);signals=[];fib_setups=[];opening_setups=[];scan_issues=[]
+        d=self.snapshot('dashboard');indices=d.get('indices',[]);signals=[];fib_setups=[];opening_setups=[];scan_issues=[];premium_rows=[]
         # Independent of the previous trend score: an intraday Fib reversal
         # must not disappear simply because dashboard bias is Sideways.
         try:
@@ -1004,9 +1010,11 @@ class InsightsService:
                     five=five.copy();five.index=five.index.tz_convert(IST)
                     five=five[five.index+pd.Timedelta(minutes=5)<=pd.Timestamp(now)]
                 if five is None:raise ValueError('No five-minute history returned')
-                opening_setups.extend(self._opening_setups(item,now,cash_five=five))
+                opening_rows=self._opening_setups(item,now,cash_five=five)
+                opening_setups.extend(opening_rows)
                 fib_rows=self._fib_setups(item,now,cash_five=five)
                 fib_setups.extend(fib_rows)
+                premium_rows.extend(index_premium.assess(self.broker,item,five,opening_rows+fib_rows,now,_holiday_set()))
                 if not fib_rows:scan_issues.append(item['symbol']+': Fibonacci input is missing or stale; opening rows explain candle readiness.')
             except (BrokerUnavailable,ValueError,KeyError,TypeError,IndexError):
                 scan_issues.append(item['symbol']+': five-minute history unavailable; check Dhan data access and mapping.')
@@ -1015,56 +1023,13 @@ class InsightsService:
         mapped={_norm(x['symbol']) for x in available}
         for label,aliases in [('NIFTY',{'NIFTY','NIFTY50'}),('BANKNIFTY',{'BANKNIFTY','NIFTYBANK'}),('SENSEX',{'SENSEX'})]:
             if not mapped.intersection(aliases):scan_issues.append(label+': index instrument mapping unavailable')
-        for idx in indices:
-            if _norm(idx['symbol']) not in ('NIFTY','NIFTY50','BANKNIFTY','NIFTYBANK','SENSEX'):
-                continue
-            if idx['bias'] not in ('Uptrend','Downtrend') or not recent_context(idx,now):
-                continue
-            try:
-                item=self._lookup(idx['symbol'])
-                if item is None:continue
-                five=self.broker.history(item,now,minutes=5,lookback_days=8)
-                if not recent_frame(five,now,5,20):continue
-                smc=advanced_smc.structure(five,now)
-                if not smc.get('available'):continue
-                # Cash indices may have zero/unavailable reported volume.
-                # Never use zero index volume as proof of weak flow.
-                # Option-chain OI/PCR supplies a separate positioning proxy.
-                if smc['rvol']>0 and smc['rvol']<1.5:continue
-                if idx['bias']=='Uptrend' and not smc['up_breakout']:continue
-                if idx['bias']=='Downtrend' and not smc['down_breakdown']:continue
-                h15=self.broker.history(item,now,minutes=15,lookback_days=12)
-                h60=self.broker.history(item,now,minutes=60,lookback_days=30)
-                expected='UP' if idx['bias']=='Uptrend' else 'DOWN'
-                if advanced_smc.trend(h15)!=expected or advanced_smc.trend(h60)!=expected:continue
-                exps=self.broker.expiry_list(item)
-                expiry=next((x for x in sorted(exps) if x>=now.date().isoformat()),None)
-                if not expiry:continue
-                p=options.option_plan(self.broker.option_chain(item,expiry),idx['symbol'],idx['bias'],expiry,now)
-                if p:
-                    p.update(backtest_status='UNVALIDATED',
-                             status='HYPOTHETICAL — OPTION QUOTE AGE NOT VERIFIED',
-                             instrument_id=p['security_id'],
-                             segment='NSE_FNO' if _norm(idx['symbol'])!='SENSEX' else 'BSE_FNO',
-                             instrument_type='OPTIDX',quote_freshness='NOT VERIFIED',
-                             research_only=True,mtf={'5m':idx['bias'],'15m':expected,'60m':expected},
-                             order_flow_proxy='OPTION CHAIN OI / PCR — POSITIONING ONLY',
-                             smc=dict(bos_up=smc['bos_up'],bos_down=smc['bos_down'],
-                                 choch_up=smc['choch_up'],choch_down=smc['choch_down'],
-                                 fvg_up=smc['fvg_up'],fvg_down=smc['fvg_down'],
-                                 rvol=smc['rvol']),data_asof=idx.get('asof'))
-                    signals.append(cycle_wave.annotate(p,five,now))
-                    # Never journal a hypothetical premium price as an observed signal.
-            except (ValueError,BrokerUnavailable,KeyError):continue
+        signals=[r for r in premium_rows if r.get('entry') is not None and not r.get('blockers')]
         phase='INDEPENDENT MAPPED INDEX SCAN'
-        self._update('index-options',dict(signals=signals,fib_setups=fib_setups,
+        self._update('index-options',dict(signals=signals,premium_rows=premium_rows,fib_setups=fib_setups,
               opening_setups=opening_setups,opening_ready=sum(x.get('state')=='DIRECTION_READY' for x in opening_setups),
-              status=(phase+' — LEGACY OPTION PLANS + SPOT WATCHES' if signals else
-                      phase+' — SPOT CE/PE WATCHES (PREMIUM UNVERIFIED)'
-                      if any(x.get('state')=='DIRECTION_READY' for x in opening_setups)
-                      else phase+' — NO CONFIRMED SPOT DIRECTION YET'),
+              status=phase+(' — ATM PREMIUM SETUPS' if signals else ' — WAIT; SEE PREMIUM BLOCKERS'),
               phase=phase,scan_issues=scan_issues,scanned=len(available),qualified=len(signals),mtf='5m+15m+60m',
-              note='Rechecked every 5 minutes. Index direction requires 5m/15m/60m; index volume may be unavailable. Option OI/PCR are positioning proxies; premium age unverified; no trades placed'),now)
+              note='Rechecked every 5 minutes. Strike identifies the ATM contract; entry/SL/targets are OPTION PREMIUMS. False-move checks are filters, not guarantees. No orders placed'),now)
         return signals
 
     def scan_fo(self,now):
@@ -1350,13 +1315,31 @@ class InsightsService:
         # bypass an exchange holiday excluded from a user-provided calendar.
         regular_session=is_market_session(local.replace(hour=15,minute=20,second=0,microsecond=0),calendar)
         after_close=(regular_session
-                     and (15,40)<=(local.hour,local.minute)<=(18,0))
+                     and (15,40)<=(local.hour,local.minute))
         # At 08:00 or a later morning startup, use only PRIOR COMPLETED
         # daily candles. No live 08:00 quote or pre-open trading is implied.
         is_trading_day=is_market_session(local.replace(hour=10,minute=0,second=0,microsecond=0),calendar)
         morning=(8,0)<=(local.hour,local.minute)<(9,15) and is_trading_day
         if not is_market_session(now,calendar) and not after_close and not morning:
-            return dict(status='BLOCKED — holiday calendar missing, weekend or outside trading hours')
+            # Evening, overnight and weekend startup can prepare the latest actual
+            # completed session. 15:30–15:39 waits for final daily data settlement.
+            if calendar is None or (regular_session and (15,30)<=(local.hour,local.minute)<(15,40)):
+                return dict(status='BLOCKED — calendar unavailable or waiting for final daily candles')
+            if not callable(getattr(self.broker,'daily',None)) or not callable(getattr(self.broker,'instruments',None)):
+                return dict(status='BLOCKED — daily source unavailable')
+            if not self._job_lock.acquire(blocking=False):return dict(status='SCAN ALREADY RUNNING')
+            try:
+                expected=completed_session(local,calendar).isoformat();cached=self.snapshot('pre-market')
+                if cached.get('previous_session')==expected and cached.get('assessed',0)>0 and not cached.get('mixed_data_dates'):
+                    return dict(status='PRE-MARKET WATCHLIST SAVED',watchlist_date=expected)
+                key=('offhours-premarket',int(local.timestamp())//300)
+                if key in self._done:return dict(status='WAITING FOR SOURCE RETRY')
+                self._done.add(key);result=self.scan_premarket(local)
+                return dict(status='PRE-MARKET OFF-HOURS SCAN COMPLETE',assessed=result.get('assessed',0))
+            except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
+                self._last_error='premarket: '+str(exc)[:160]
+                return dict(status='PRE-MARKET WATCHLIST UNAVAILABLE')
+            finally:self._job_lock.release()
         if not self._job_lock.acquire(blocking=False):
             return dict(status='SCAN ALREADY RUNNING')
         if morning:
@@ -1390,27 +1373,18 @@ class InsightsService:
         if after_close:
             try:
                 key=(local.date().isoformat(),'longterm-daily')
-                if key in self._done:return dict(status='DAILY LONGTERM ALREADY COMPLETE')
+                prepared_count=0
+                cached=self.snapshot('pre-market')
+                ready=(cached.get('previous_session')==local.date().isoformat() and cached.get('assessed',0)>0 and not cached.get('mixed_data_dates'))
+                attempt=('close-premarket',int(local.timestamp())//300)
+                if not ready and attempt not in self._done and callable(getattr(self.broker,'instruments',None)) and callable(getattr(self.broker,'daily',None)):
+                    self._done.add(attempt)
+                    try:prepared_count=self.scan_premarket(local).get('assessed',0)
+                    except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:self._last_error='premarket-prep: '+str(exc)[:160]
+                if key in self._done:return dict(status='DAILY LONGTERM ALREADY COMPLETE',premarket_prepared=prepared_count)
                 result=self.scan_longterm(local,swing_keys={liquidity_key(x) for x in self.liquidity.selected('swing-trades',local)})
-                # Produce and persist the NEXT morning's watchlist using
-                # today's fully completed daily candles. Any premarket
-                # failure is reported, but cannot retroactively erase the
-                # successful swing/multibagger scan.
-                if not (callable(getattr(self.broker,'instruments',None))
-                        and callable(getattr(self.broker,'daily',None))):
-                    # Some development/test brokers implement long-term
-                    # scanning only. Optional premarket preparation must
-                    # not invalidate an otherwise completed long-term job.
-                    result['premarket_prepared']=0
-                    result['premarket_prep_status']='UNAVAILABLE — BROKER DAILY/INSTRUMENTS UNSUPPORTED'
-                else:
-                    try:
-                        prepared=self.scan_premarket(local)
-                        result['premarket_prepared']=prepared.get('assessed',0)
-                    except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:
-                        with self._lock:self._last_error='premarket-prep: '+str(exc)[:160]
-                        result['premarket_prepared']=0
-                        result['premarket_prep_status']='UNAVAILABLE — DATA CHECK FAILED'
+                result['premarket_prepared']=prepared_count
+                result['premarket_prep_status']='SAVED' if ready or prepared_count else 'UNAVAILABLE — SOURCE OR DAILY DATA NOT READY'
                 self._done.add(key)
                 return dict(status='DAILY LONGTERM COMPLETE',**result)
             except (BrokerUnavailable,ValueError,KeyError,TypeError) as exc:

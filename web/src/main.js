@@ -1,3 +1,4 @@
+import IndexPremium from './index_premium';
 import UniverseCoverage from './universe';
 import React, {useEffect,useMemo,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -618,7 +619,7 @@ function PremarketWatch({data={}}){
       return e('tr',{key:i},...v.map((value,j)=>e('td',{key:j},value)));
     })))):e('div',{className:'empty'},'No prior-session candidates verified.'));
  return e('div',null,
-   e(Notice,{warning:true},'08:00 morning list uses the previous COMPLETED trading session. These are candidates, not CE/PE/stock buy or sell signals.'),
+   e(Notice,{warning:true},'Saved watchlist uses the latest COMPLETED trading session and can be prepared after hours, overnight or on weekends. Dated candidates are analysed below from 09:30 on the next trading day; they are not entries by themselves.'),
    e('div',{className:'tile-grid'},
       e(Tile,{title:'WATCHLIST STATE',value:data.status||'WAITING'}),
       e(Tile,{title:'DAILY DATA DATE',value:data.previous_session||'—'}),
@@ -1024,7 +1025,7 @@ function App(){
        e(Tile,{title:active==='F&O Stocks'?'QUALIFIED STOCKS / 8':active==='Index Options'?'SPOT WATCHES + LEGACY':'CANDIDATES',
            value:(data.signals||[]).length+(active==='Index Options'?(data.opening_ready||0):0),
            sub:active==='Intraday'?`BUY ${data.qualified_buy||0} · SELL ${data.qualified_sell||0}`:
-             active==='F&O Stocks'?'Up to 8 unique stocks · rule score, not win rate':active==='Index Options'?`Directional watches ${data.opening_ready||0} · Legacy option scenarios ${(data.signals||[]).length}`:''}),e(Tile,{title:'STATUS',value:data.status||'Waiting'}),e(Tile,{title:'LAST SCAN',value:data.updated_at||'Not yet run'})),
+             active==='F&O Stocks'?'Up to 8 unique stocks · rule score, not win rate':active==='Index Options'?`Directional watches ${data.opening_ready||0} · ATM premium setups ${(data.signals||[]).length}`:''}),e(Tile,{title:'STATUS',value:data.status||'Waiting'}),e(Tile,{title:'LAST SCAN',value:data.updated_at||'Not yet run'})),
      data.scanned!=null?e('p',{className:'small muted'},
        'Deep universe: ',data.universe_scanned_at_discovery??data.scanned,' · Broad quote coverage: ',data.breadth_quotes??'—',
        ' · Discovery method: ',data.discovery_mode??'—',' · Locked shortlist: ',data.shortlisted??data.shortlist_size??'—',
@@ -1043,11 +1044,13 @@ function App(){
      active==='Intraday'?e(IntradaySignals,{data}):
      e(React.Fragment,null,
        active==='Index Options'?e(React.Fragment,null,
+       e(IndexPremium,{rows:data.premium_rows||[]}),
+       e('details',null,e('summary',null,'Underlying chart evidence — index levels, not option entry prices'),
        e(OpeningOptionSetups,{items:data.opening_setups||[]}),
-       e(FibOptionSetups,{items:data.fib_setups||[]})):null,
+       e(FibOptionSetups,{items:data.fib_setups||[]}))):null,
        e(Section,{title:active==='F&O Stocks'?'Top 8 qualifying F&O stock options':'Existing rule-based research candidates'},
           active==='F&O Stocks'?e('div',null,...(data.signals||[]).map(p=>e('p',{key:p.underlying,className:'small'},`#${p.selection_rank??'—'} ${p.underlying} · Rule quality ${p.selection_score??'—'}/100 · Spread ${p.option_spread_pct??'—'}% · `,(p.selection_reasons||[]).join(' · ')))):null,
-          e(Signals,{items:data.signals||[],empty:data.status||'No qualifying signals. Missing inputs are never filled with invented values.'})))) :null,
+          active==='Index Options'?null:e(Signals,{items:data.signals||[],empty:data.status||'No qualifying signals. Missing inputs are never filled with invented values.'})))) :null,
     active==='Track Record'?e(TrackRecord,{data}):null,
     e('div',{className:'footer'},'Powered by local Python Flask API · Dhan-sourced analytics only · No broker orders · Data and backtests may be incomplete'))));
 }
