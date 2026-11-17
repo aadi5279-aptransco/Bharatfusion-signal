@@ -12,7 +12,8 @@ def slot(now):
     return f'{t.date()}:{due[-1]}' if due else None
 
 class LiquidityShortlist:
-    def __init__(self,broker,root,limit=MAX_SYMBOLS,pause=1.05):
+    def __init__(self,broker,root,limit=MAX_SYMBOLS,pause=1.05,universe=None):
+        self.nifty500=universe
         self.broker=broker;self.path=Path(root)/'liquidity_shortlists.json';self.limit=limit;self.pause=pause
         try:self.state=json.loads(self.path.read_text())
         except (OSError,ValueError):self.state={}
@@ -22,10 +23,11 @@ class LiquidityShortlist:
         tmp.write_text(json.dumps(self.state,default=str,allow_nan=False),encoding='utf-8');os.replace(tmp,self.path)
     def selected(self,tab,now):
         if self.state.get('date')!=now.astimezone(IST).date().isoformat():return []
+        if tab=='intraday' and self.nifty500 is not None and self.state.get('intraday_universe_version')!=1:return []
         return list(self.state.get('lists',{}).get(tab,[]))
     def metadata(self,now):
         s=self.state
-        return {k:s.get(k) for k in ('date','attempt_slot','updated_at','status','universe','quoted','missing','error','selected_counts')}
+        return {k:s.get(k) for k in ('date','attempt_slot','updated_at','status','universe','quoted','missing','error','selected_counts','nifty500','intraday_quoted','intraday_missing')}
     def refresh(self,now):
         now=now.astimezone(IST);due=slot(now)
         if due is None or due==self.state.get('attempt_slot'):return self.metadata(now)
@@ -37,6 +39,18 @@ class LiquidityShortlist:
             broad=self.broker.longterm_instruments() if hasattr(self.broker,'longterm_instruments') else mapped
             all_items={key(x):dict(x) for x in broad if x.get('kind')=='stock' and x.get('segment') in ('NSE_EQ','BSE_EQ')}
             for k,x in contracts.items():all_items[k]=dict(x)
+            nifty_keys=None;membership=None;intraday_quoted=0
+            if self.nifty500 is not None:
+                try:
+                    nifty_items,membership=self.nifty500.resolve(now)
+                    nifty_keys={key(x) for x in nifty_items}
+                    for x in nifty_items:
+                        k=key(x);all_items[k]=dict(all_items.get(k,{}),**x)
+                except Exception as exc:
+                    nifty_keys=set();membership=dict(name='NIFTY 500',status='UNAVAILABLE',error=str(exc)[:250])
+                self.state.update(nifty500=membership,intraday_universe_version=1)
+                # Invalidate older broad-list selections and removed constituents immediately.
+                self.state['lists']['intraday']=[x for x in self.state['lists'].get('intraday',[]) if key(x) in nifty_keys]
             ranked=[];quoted=0;requests=0
             for segment in ('NSE_EQ','BSE_EQ'):
                 group=[x for x in all_items.values() if x['segment']==segment]
@@ -53,6 +67,7 @@ class LiquidityShortlist:
                             if not all(math.isfinite(x) for x in (price,volume,change)) or not 0<=age<=120 or price<=0 or volume<=0:continue
                         except (KeyError,ValueError,TypeError):continue
                         quoted+=1
+                        if nifty_keys is not None and key(item) in nifty_keys:intraday_quoted+=1
                         turnover=price*volume
                         if not math.isfinite(turnover):continue
                         if price<20 or volume<100000 or turnover<10000000:continue
@@ -60,9 +75,12 @@ class LiquidityShortlist:
                         ranked.append(row)
             if all_items and not quoted:raise ValueError('No valid broad liquidity quotes; previous same-day shortlist retained')
             ranked.sort(key=lambda x:(-x['liquidity_turnover'],-x['liquidity_volume'],key(x)))
-            cash=ranked[:self.limit];fo=[x for x in ranked if key(x) in contracts][:self.limit]
-            self.state.update(lists={'intraday':cash,'fo-stocks':fo,'swing-trades':cash},updated_at=now.isoformat(),
+            cash=ranked[:self.limit]
+            intraday=[x for x in ranked if nifty_keys is None or key(x) in nifty_keys][:self.limit]
+            fo=[x for x in ranked if key(x) in contracts][:self.limit]
+            self.state.update(lists={'intraday':intraday,'fo-stocks':fo,'swing-trades':cash},updated_at=now.isoformat(),
                 status='READY' if quoted==len(all_items) else 'PARTIAL QUOTE COVERAGE',universe=len(all_items),quoted=quoted,
-                missing=len(all_items)-quoted,selected_counts={'intraday':len(cash),'fo-stocks':len(fo),'swing-trades':len(cash)})
+                missing=len(all_items)-quoted,intraday_quoted=intraday_quoted,intraday_missing=len(nifty_keys or [])-intraday_quoted,
+                selected_counts={'intraday':len(intraday),'fo-stocks':len(fo),'swing-trades':len(cash)})
         except Exception as exc:self.state.update(status='REFRESH FAILED — PREVIOUS SAME-DAY LIST ONLY',error=str(exc)[:200])
         self.save();return self.metadata(now)

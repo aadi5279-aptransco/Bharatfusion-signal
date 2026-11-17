@@ -39,11 +39,15 @@ def create_app(service=None):
 
     @app.post('/api/v1/market-insights/notifications/read')
     def notifications_read():
-        body=request.get_json(silent=True) or {};through=body.get('through') if isinstance(body,dict) else None
-        if type(through) is not int or not 0<=through<=9223372036854775807:return jsonify(error='Invalid notification identifier'),400
-        try:service.event_center.mark_read(through)
+        body=request.get_json(silent=True)
+        if not isinstance(body,dict) or set(body) not in ({'through'},{'id'}):return jsonify(error='Provide through or id'),400
+        value=next(iter(body.values()))
+        if type(value) is not int or not 0<=value<=9223372036854775807:return jsonify(error='Invalid notification identifier'),400
+        try:
+            if 'id' in body:service.event_center.mark_read(notification_id=value)
+            else:service.event_center.mark_read(value)
+            return jsonify(status='OK',**service.event_center.notifications())
         except Exception:return jsonify(error='Could not mark notifications read'),503
-        return jsonify(status='OK')
 
     @app.post('/api/v1/market-insights/events/add')
     def events_add():

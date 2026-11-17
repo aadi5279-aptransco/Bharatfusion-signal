@@ -9,6 +9,7 @@ from insights.tests.test_liquidity_shortlist import Broker
 class SchedulingTests(unittest.TestCase):
     def prepare(self,root):
         b=Broker();s=InsightsService(b,root);s.liquidity.pause=0
+        s.nifty500.resolve=Mock(return_value=(b.items,dict(name='NIFTY 500',mapped=len(b.items))))
         for name in ('dashboard','scan_intraday','scan_fo','scan_swing_shortlist','scan_index_options','scan_btst','scan_btst_closing','reconcile_outcomes'):setattr(s,name,Mock(return_value={}))
         return s,b
     def test_all_refresh_slots_and_only_shortlist_checks_between(self):

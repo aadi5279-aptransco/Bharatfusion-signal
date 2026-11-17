@@ -1,11 +1,12 @@
 import React,{useEffect,useState} from 'react';
+import UniverseCoverage from './universe';
 const e=React.createElement;
 const money=x=>x==null?'—':'₹'+Number(x).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 export default function PositionalPanel(){
  const [data,setData]=useState({rows:[],coverage:{},refresh:{},sources:[]});
  const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [reload,setReload]=useState(0);
  const [timeframe,setTimeframe]=useState('');const [strategy,setStrategy]=useState('');const [search,setSearch]=useState('');const [ready,setReady]=useState(false);
- useEffect(()=>{let alive=true;const load=async()=>{try{const r=await fetch('/api/v1/market-insights/positional');if(!r.ok)throw Error('Could not load positional scan');const d=await r.json();if(alive)setData(d)}catch(ex){if(alive)setError(ex.message)}};
+ useEffect(()=>{let alive=true;const load=async()=>{try{const r=await fetch('/api/v1/market-insights/positional');if(!r.ok)throw Error('Could not load positional scan');const d=await r.json();if(alive){setData(d);setError('')}}catch(ex){if(alive)setError(ex.message)}};
  load();const id=setInterval(load,10000);return()=>{alive=false;clearInterval(id)}},[reload]);
  const refresh=async()=>{setBusy(true);setError('');try{const r=await fetch('/api/v1/market-insights/positional/refresh',{method:'POST'});const d=await r.json();if(!r.ok)throw Error(d.error||d.status);setReload(x=>x+1)}catch(ex){setError(ex.message)}finally{setBusy(false)}};
  const rows=data.rows.filter(r=>(!timeframe||(r.timeframe==='Daily'?'1D':r.timeframe.includes('INTRADAY')?'15m':r.timeframe)===timeframe)&&(!strategy||r.strategy===strategy)&&(!ready||r.status==='READY — REVIEW ENTRY')&&(`${r.symbol} ${r.company}`).toLowerCase().includes(search.toLowerCase()));
@@ -14,7 +15,7 @@ export default function PositionalPanel(){
   e('div',{className:'scanner-table-wrap'},e('table',{className:'scanner-table'},
    e('thead',null,e('tr',null,...['Stock / strategy','Entry reference','Target 1','Target 2','SL','Last 5m close','Status / reason'].map(x=>e('th',{key:x},x)))),
    e('tbody',null,...list.map(r=>e('tr',{key:r.key},
-    e('td',null,e('strong',null,r.symbol),e('small',null,r.exchange+' · '+r.side),e('small',null,r.strategy+' · '+r.timeframe),e('small',null,'Signal: '+r.signal_at)),
+    e('td',null,e('strong',null,r.symbol),e('small',null,r.exchange+' · '+r.side),e('small',null,r.strategy+' · '+r.timeframe),e('small',null,'Signal: '+r.signal_at),e('small',null,'Last checked: '+(r.checked_at||'—'))),
     e('td',null,money(r.entry)),e('td',null,money(r.t1)),e('td',null,money(r.t2)),e('td',null,money(r.sl),e('small',null,r.risk_pct+'% risk')),
     e('td',null,money(r.last_price),e('small',null,r.price_at||'Awaiting completed market candle')),
     e('td',{className:'positional-reason'},e('strong',{className:r.status.startsWith('READY')?'positive-text':'muted'},r.status),e('p',null,r.reason),
@@ -25,8 +26,11 @@ export default function PositionalPanel(){
    e('button',{onClick:refresh,disabled:busy||data.refresh.status==='RUNNING'},busy?'Requesting…':'Check now')),
    e('p',{role:'status'},e('strong',null,data.refresh.status||'Waiting'),' · Last completed scan: ',data.updated_at||'Not yet run',
      data.refresh.status==='RUNNING'?` · ${data.refresh.completed||0}/${data.refresh.total||'…'} stocks`:''),
-   e('p',{className:'small muted'},'Mapped: ',data.coverage.mapped??'—',' · Selected: ',data.coverage.selected??'—',' · Scanned: ',data.coverage.scanned??'—',' · Valid daily charts: ',data.coverage.eligible??'—',' · Outside selected universe: ',data.coverage.omitted??'—'),
-   e('p',{className:'small'},'Background scans run while the backend stays open, even when you leave this tab. Daily candles confirm after 15:40 IST; five-minute checks do not turn unfinished daily candles into signals. Universe: existing mapped cash stocks, limited by INSIGHTS_MAX_SYMBOLS (default 30), optionally INSIGHTS_WATCHLIST.'),
+   e('p',{className:'small muted'},'Mapped: ',data.coverage.mapped??'—',' · Selected: ',data.coverage.selected??'—',' · Scanned: ',data.coverage.scanned??'—',' · Valid daily charts: ',data.coverage.eligible??'—',' · Not checked this cycle: ',data.coverage.omitted??'—'),
+   e(UniverseCoverage,{data:data.coverage.membership}),
+   e('p',null,'Across rotating batches: ',data.coverage.unique_attempted??0,' attempted · ',data.coverage.unique_assessed??0,' assessed · ',data.coverage.remaining??'—',' pending for the current completed daily session.'),
+   data.coverage.budget_exhausted?e('p',{className:'notice warning'},'Cycle time budget reached. Saved progress will resume in the next cycle.'):null,
+   e('p',{className:'small'},'Background scans run while the backend stays open, even when you leave this tab. Daily candles confirm after 15:40 IST; five-minute checks do not turn unfinished daily candles into signals. Universe: NIFTY 500 eligible NSE equities, mapped by ISIN. Discovery rotates through batches of 25 (INSIGHTS_POSITIONAL_BATCH_SIZE); existing setups get a separate bounded monitoring lane. Initial full coverage takes multiple cycles and depends on source response time. Individual rows expire after 10 minutes without a check. Legacy INSIGHTS_MAX_SYMBOLS and INSIGHTS_WATCHLIST do not truncate this universe.'),
    error?e('p',{className:'notice warning',role:'alert'},error):null,
    data.refresh.error?e('p',{className:'notice warning'},data.refresh.error):null,
    data.stale&&data.updated_at?e('p',{className:'notice warning'},'Scan is stale or failed. Previous rows are for inspection only.'):null),
