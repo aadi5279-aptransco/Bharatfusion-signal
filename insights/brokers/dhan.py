@@ -119,7 +119,7 @@ class DhanReadOnly:
 
     def history(self,item,now=None,minutes=5,lookback_days=6,oi=False):
         now=(now or datetime.now(IST)).astimezone(IST)
-        key=(str(item['segment']),str(item['id']),minutes,lookback_days,oi)
+        key=(str(item['segment']),str(item['id']),minutes,lookback_days,oi,now.date().isoformat(),(now.hour*60+now.minute-555)//minutes)
         with self._lock:
             existing=self._history_cache.get(key)
             if existing and time.monotonic()-existing[0]<180:return existing[1].copy()
@@ -142,7 +142,9 @@ class DhanReadOnly:
             frame=_regular_cash_session_bars(frame,item,minutes)
             if frame.empty:raise ValueError('No completed regular-session candles')
         except (KeyError,TypeError,ValueError) as exc:raise BrokerUnavailable('Invalid Dhan OHLCV') from exc
-        with self._lock:self._history_cache[key]=(time.monotonic(),frame.copy())
+        with self._lock:
+            self._history_cache={k:v for k,v in self._history_cache.items() if k[:5]!=key[:5] or k==key}
+            self._history_cache[key]=(time.monotonic(),frame.copy())
         return frame
 
     def daily(self,item,now=None,days=450,oi=False):
@@ -258,11 +260,12 @@ class DhanReadOnly:
                 if baseline<=0:continue
                 change_pct=100*(price/baseline-1)
             except (TypeError,ValueError,ZeroDivisionError):continue
-            if not -40<=change_pct<=40:continue
+            if item.get('kind')!='option' and not -40<=change_pct<=40:continue
             out[key]=dict(change_pct=round(change_pct,3),volume=volume,
                 last_price=round(price,2),
                 baseline_type='PREVIOUS_CLOSE' if previous_close>0 else 'SESSION_OPEN',
-                fetched_at=now.isoformat(),source='DHAN SESSION QUOTE')
+                fetched_at=(datetime.now(IST) if item.get('kind')=='option' else now).isoformat(),source='DHAN SESSION QUOTE',
+                last_trade_time=quote.get('last_trade_time'),depth=quote.get('depth'),oi=quote.get('oi'))
         return out
 
     def depth_snapshots(self, items, now=None):
