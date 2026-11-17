@@ -58,3 +58,40 @@ class EventTests(unittest.TestCase):
             self.assertEqual(client.post('/api/v1/market-insights/notifications/read',json={'through':'bad'}).status_code,400)
             self.assertEqual(client.post('/api/v1/market-insights/notifications/read',json={'through':1},environ_overrides={'REMOTE_ADDR':'1.2.3.4'}).status_code,403)
             self.assertEqual(client.post('/api/v1/market-insights/events/add',json={}).status_code,400)
+
+
+class ReadNotificationTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.m=EventCenter(self.tmp.name,service())
+        for i in range(3):self.m.publish(str(i),'Alert '+str(i),'Body','Intraday',now=NOW)
+    def test_read_alerts_hidden_after_restart_and_duplicate_publish(self):
+        ids=[r['id'] for r in self.m.notifications()['alerts']]
+        self.m.mark_read(notification_id=ids[1])
+        m=EventCenter(self.tmp.name,service());m.publish('1','Same alert','Body','Intraday',now=NOW)
+        out=m.notifications()
+        self.assertEqual([a['id'] for a in out['alerts']],[ids[0],ids[2]])
+        self.assertEqual(out['unread'],2);self.assertEqual(out['latest_id'],ids[0])
+    def test_mark_all_keeps_concurrently_created_new_alert(self):
+        through=self.m.notifications()['latest_id']
+        self.m.publish('new','New alert','Body','F&O Stocks',now=NOW+1)
+        self.m.mark_read(through)
+        out=self.m.notifications();self.assertEqual(out['unread'],1)
+        self.assertEqual(out['alerts'][0]['title'],'New alert')
+        self.m.mark_read(out['latest_id']);self.assertEqual(self.m.notifications()['alerts'],[])
+    def test_api_individual_and_all_read_return_current_unread_only(self):
+        from insights.api import create_app
+        c=create_app(SimpleNamespace(event_center=self.m)).test_client()
+        identifier=self.m.notifications()['alerts'][1]['id']
+        r=c.post('/api/v1/market-insights/notifications/read',json={'id':identifier})
+        self.assertEqual(r.status_code,200);self.assertEqual(r.json['unread'],2)
+        self.assertNotIn(identifier,[a['id'] for a in r.json['alerts']])
+        r=c.post('/api/v1/market-insights/notifications/read',json={'through':r.json['latest_id']})
+        self.assertEqual(r.json['alerts'],[]);self.assertEqual(c.get('/api/v1/market-insights/notifications').json['unread'],0)
+        for body in ({'id':True},{'id':-1},{'id':2,'through':2},{'id':'2'},{},[]):
+            self.assertEqual(c.post('/api/v1/market-insights/notifications/read',json=body).status_code,400)
+    def test_unread_beyond_200_read_rows_remains_visible(self):
+        first=self.m.notifications()['alerts'][-1]['id']
+        for i in range(205):self.m.publish('later'+str(i),'Later','Body','Intraday',now=NOW+1)
+        with self.m.db() as db:db.execute('UPDATE alerts SET seen=1 WHERE seq>?',(first,))
+        self.assertEqual([r['id'] for r in self.m.notifications()['alerts']],[first])

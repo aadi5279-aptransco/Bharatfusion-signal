@@ -1,6 +1,6 @@
 """Auditable positional research and a non-overlapping five-minute worker."""
 from __future__ import annotations
-import math, os, threading, time
+import math, os, threading, time, hashlib
 from datetime import datetime, timedelta
 from pathlib import Path
 import pandas as pd
@@ -58,6 +58,7 @@ def setup(item,strategy,bar,entry,sl,reason,exit_rule,side='BUY',timeframe='Dail
     if not (math.isfinite(risk) and entry>0 and sl>0 and .002<=risk/entry<=.06):return None
     t1=round(float(t1 if t1 is not None else entry+sign*1.5*risk),2)
     t2=round(float(t2 if t2 is not None else entry+sign*2.5*risk),2)
+    if not all(math.isfinite(v) and v>0 for v in (entry,sl,t1,t2)):return None
     if not sign*(t2-t1)>0 or not sign*(t1-entry)>0:return None
     return dict(key=f"{item['segment']}:{item['id']}:{strategy}:{bar.isoformat()}",symbol=item.get('ticker') or item['symbol'],
         company=item['symbol'],exchange=item['segment'].split('_')[0],security_id=str(item['id']),strategy=strategy,
@@ -110,6 +111,7 @@ def completed_five(frame,now):
 
 def assess(row,five,now,holidays):
     r=dict(row)
+    r['status']='WAITING FOR PRICE'
     if five is None or five.empty:return r
     last=five.iloc[-1];stamp=five.index[-1]+pd.Timedelta(minutes=5)
     r.update(last_price=round(float(last.close),2),price_at=stamp.isoformat())
@@ -189,9 +191,11 @@ def r1_setups(daily,five,item,now,holidays):
     return [r for r in out if r]
 
 class PositionalScanner:
-    def __init__(self,broker,root,holidays,job_lock,limit=None,watchlist=None):
-        self.broker=broker;self.holidays=holidays;self.job_lock=job_lock
-        self.limit=max(1,min(200,limit or MAX_SYMBOLS));self.watchlist=WATCHLIST if watchlist is None else watchlist
+    def __init__(self,broker,root,holidays,job_lock,limit=None,watchlist=None,universe=None):
+        self.broker=broker;self.holidays=holidays;self.job_lock=job_lock;self.universe=universe
+        self.limit=max(1,min(100,limit or int(os.getenv('INSIGHTS_POSITIONAL_BATCH_SIZE','25'))))
+        # NIFTY 500 coverage is not silently narrowed by a legacy global watchlist.
+        self.watchlist=([] if universe is not None else WATCHLIST) if watchlist is None else watchlist
         self.store=StockScanner(broker,Path(root)/'positional',holidays,job_lock)
         self._lock=threading.RLock();self._stop=threading.Event();self._thread=None;self._worker=None
         self.ema9=EMA9Scanner(broker,self._call,adjusted=os.getenv('INSIGHTS_EMA9_ADJUSTED_DATA_CONFIRMED','false').lower()=='true')
@@ -202,9 +206,11 @@ class PositionalScanner:
         saved.update(refresh=state,sources=SOURCES,interval_seconds=300,universe_limit=self.limit,
             note='Daily signals use completed sessions; five-minute prices only review entry readiness. Targets are scenarios, not fills. Backend must remain running.')
         stamp=saved.get('updated_at');age=(now-datetime.fromisoformat(stamp)).total_seconds() if stamp else None
-        saved['age_seconds']=age;saved['stale']=age is None or age>600 or state.get('status')=='FAILED'
+        saved['age_seconds']=age;saved['stale']=age is None or not 0<=age<=600 or state.get('status')=='FAILED'
         for r in saved['rows']:
-            if saved['stale']:r['status']='STALE SCAN — DO NOT USE'
+            try:row_age=(now-datetime.fromisoformat(r.get('checked_at',saved.get('analysis_at','')))).total_seconds()
+            except (ValueError,TypeError):row_age=float('inf')
+            if saved['stale'] or not 0<=row_age<=600:r['status']='STALE SCAN — DO NOT USE'
             elif not is_market_session(now,self.holidays()) and r['status'].startswith(('READY','WAITING','EXTENDED')):r['status']='CLOSED — REVIEW NEXT SESSION'
             elif 'INTRADAY' in r['timeframe'] and (now.hour,now.minute)>(14,30) and r['status'].startswith('READY'):r['status']='ENTRY WINDOW CLOSED'
         return saved
@@ -230,15 +236,44 @@ class PositionalScanner:
             holidays=self.holidays()
             if holidays is None:raise ValueError('Configure verified holiday calendar before positional scans')
             if not self.broker.configured():raise ValueError('Configure Dhan credentials and active data access')
-            items=self._call(self.broker.instruments)
+            membership={}
+            if self.universe is not None:
+                items,membership=self._call(lambda:self.universe.resolve(now))
+            else:items=self._call(self.broker.instruments)
             items=[x for x in items if x.get('kind')=='stock' and x.get('segment') in ('NSE_EQ','BSE_EQ')]
             if self.watchlist:
                 wanted={str(x).upper() for x in self.watchlist}
                 items=[x for x in items if wanted.intersection({str(x.get(k,'')).upper() for k in ('symbol','ticker','id')})]
-            items=list({x['segment']+':'+str(x['id']):x for x in items}.values());available=len(items);items=items[:self.limit]
+            all_items={x['segment']+':'+str(x['id']):x for x in items}
+            available=len(all_items);keys=sorted(all_items)
             expected=session_date(now,holidays);consecutive=0
+            token=hashlib.sha256(('|'.join(keys)+str(expected)).encode()).hexdigest()
+            progress=self.store._read('progress',{})
+            if progress.get('token')!=token:progress=dict(token=token,cursor=0,attempted=[],assessed=[])
+            cursor=int(progress.get('cursor',0))%max(1,available)
+            rotating=(keys[cursor:]+keys[:cursor])[:self.limit]
+            previous=[r for r in previous if r['exchange']+'_EQ:'+str(r['security_id']) in all_items]
+            # Give existing setups a bounded monitoring lane; alternate it with discovery
+            # so a large active watchlist cannot starve the remainder of NIFTY 500.
+            pending={}
+            for r in previous:
+                k=r['exchange']+'_EQ:'+str(r['security_id'])
+                pending[k]=min(pending.get(k,r.get('checked_at','')),r.get('checked_at',''))
+            monitor=sorted((k for k in pending if k not in rotating),key=lambda k:pending[k])[:self.limit]
+            order=[]
+            for i in range(max(len(rotating),len(monitor))):
+                if i<len(rotating):order.append(rotating[i])
+                if i<len(monitor):order.append(monitor[i])
+            items=[all_items[k] for k in order]
+            attempted=set(progress.get('attempted',[]));assessed=set(progress.get('assessed',[]))
+            visited=set();budget_exhausted=False
+            with self._lock:self._state.update(total=len(items))
             for item in items:
                 key=item['segment']+':'+str(item['id'])
+                if self._stop.is_set() or time.monotonic()>=self._deadline:
+                    budget_exhausted=True;break
+                visited.add(key);attempted.add(key)
+                if key in rotating:cursor=(keys.index(key)+1)%max(1,available)
                 try:
                     cache=self._daily.get(key)
                     if cache and cache[0]==expected:signals,d=cache[1],cache[2]
@@ -248,6 +283,7 @@ class PositionalScanner:
                     eligible+=1;five=None
                     if is_market_session(now,holidays):
                         try:five=completed_five(self._call(lambda:self.broker.history(item,now,minutes=5,lookback_days=10)),now)
+                        except TimeoutError:raise
                         except (ValueError,RuntimeError,OSError) as exc:errors.append({'symbol':item['symbol'],'error':'5m price unavailable: '+str(exc)[:140]})
                     ema_rows,checks=self.ema9.scan(item,now,holidays);ema9_checks.extend(checks)
                     candidates=carry_daily(signals,previous,d,item)+r1_setups(d,five,item,now,holidays)+ema_rows
@@ -259,9 +295,13 @@ class PositionalScanner:
                             elif not price_path_complete(r,five,now,holidays):result['status']='WATCH — VERIFY POST-SIGNAL PRICE PATH'
                         if r.get('tracking_status') and result['status'] in ('READY — REVIEW ENTRY','WAITING FOR ENTRY','EXTENDED — DO NOT CHASE','WAITING FOR PRICE','CLOSED — REVIEW NEXT SESSION'):
                             result['status']=r['tracking_status']
+                        result['checked_at']=now.isoformat()
                         rows.append(result)
+                    assessed.add(key)
                     consecutive=0
-                except TimeoutError:raise
+                except TimeoutError as exc:
+                    errors.append({'symbol':item['symbol'],'error':str(exc)})
+                    budget_exhausted=True;done+=1;break
                 except Exception as exc:
                     errors.append({'symbol':item['symbol'],'error':str(exc)[:180]});consecutive+=1
                 done+=1
@@ -269,10 +309,17 @@ class PositionalScanner:
                 if consecutive>=3:break
                 if self._stop.wait(.2):break
             coverage=dict(mapped=available,selected=len(items),scanned=done,eligible=eligible,errors=errors,
-                ema9_checks=ema9_checks,omitted=max(0,available-len(items)),universe='Existing mapped cash-stock universe / INSIGHTS_WATCHLIST')
-            # Publish only this cycle's evaluated rows, never mix old ready rows with new prices.
+                ema9_checks=ema9_checks,omitted=max(0,available-len(visited)),
+                universe='NIFTY 500' if self.universe is not None else 'Mapped cash stocks',
+                membership=membership,batch_size=self.limit,unique_attempted=len(attempted),unique_assessed=len(assessed),
+                remaining=max(0,available-len(assessed)),next_cursor=cursor,budget_exhausted=budget_exhausted)
+            self.store._write('progress',dict(token=token,cursor=cursor,attempted=sorted(attempted),assessed=sorted(assessed)))
+            # Retain other batches for inspection, with per-row freshness; never refresh
+            # their timestamps merely because an unrelated stock was just evaluated.
+            rows.extend(r for r in previous if r['exchange']+'_EQ:'+str(r['security_id']) not in visited)
+            # snapshot() independently ages every retained row before serving it.
             self.store._write('positional',dict(rows=rows,coverage=coverage,updated_at=datetime.now(IST).isoformat(),analysis_at=now.isoformat()))
-            with self._lock:self._state.update(status='COMPLETE' if done==len(items) and not errors and all(c['status']=='CHECKED' for c in ema9_checks) else 'PARTIAL — CHECK COVERAGE',coverage=coverage)
+            with self._lock:self._state.update(status='COMPLETE' if done==len(items) and len(assessed)==available and not errors and all(c['status']=='CHECKED' for c in ema9_checks) else 'PARTIAL — CHECK COVERAGE',coverage=coverage)
         except Exception as exc:
             # Cached signals remain inspectable, but are explicitly invalidated on a failed refresh.
             with self._lock:self._state.update(status='FAILED',error=str(exc)[:200])

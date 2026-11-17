@@ -202,12 +202,18 @@ CREATE TABLE IF NOT EXISTS alerts(seq INTEGER PRIMARY KEY AUTOINCREMENT,uid TEXT
     def notifications(self):
         try:
             with self.lock,self.db() as db:
-                rows=db.execute('SELECT seq,created,body,seen FROM alerts ORDER BY seq DESC LIMIT 200').fetchall()
+                rows=db.execute('SELECT seq,created,body,seen FROM alerts WHERE seen=0 ORDER BY seq DESC LIMIT 200').fetchall()
                 unread=db.execute('SELECT count(*) FROM alerts WHERE seen=0').fetchone()[0]
-            return dict(alerts=[dict(id=s,created=t,seen=bool(v),**json.loads(b)) for s,t,b,v in rows],unread=unread,error=self.error)
+                latest=db.execute('SELECT COALESCE(MAX(seq),0) FROM alerts').fetchone()[0]
+            return dict(alerts=[dict(id=s,created=t,seen=bool(v),**json.loads(b)) for s,t,b,v in rows],unread=unread,latest_id=latest,error=self.error)
         except sqlite3.Error:return dict(alerts=[],unread=0,error='Notification storage unavailable')
-    def mark_read(self,through):
-        with self.lock,self.db() as db:db.execute('UPDATE alerts SET seen=1 WHERE seq<=?',(through,))
+    def mark_read(self,through=None,notification_id=None):
+        value=notification_id if notification_id is not None else through
+        if type(value) is not int or not 0<=value<=9223372036854775807 or (through is not None and notification_id is not None):
+            raise ValueError('Invalid notification identifier')
+        with self.lock,self.db() as db:
+            if notification_id is not None:db.execute('UPDATE alerts SET seen=1 WHERE seq=?',(notification_id,))
+            else:db.execute('UPDATE alerts SET seen=1 WHERE seq<=?',(through,))
     def start(self):
         if self.threads or self.error:return
         self.stop_event.clear()

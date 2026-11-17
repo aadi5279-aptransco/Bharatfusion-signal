@@ -12,6 +12,7 @@ from insights.fii_stock_deals import FIIStockDeals
 from insights.fii_holdings import FIIHoldings
 from insights.stock_scanner import StockScanner
 from insights.positional import PositionalScanner
+from insights.nifty500 import Nifty500Universe
 from insights.orderflow import IndexOrderFlow
 from insights.europe_markets import EuropeMarkets
 from insights.qglp import QGLPResearch
@@ -84,11 +85,12 @@ class InsightsService:
         except (OSError,ValueError,TypeError):
             pass
         self.stock_scanner=StockScanner(self.broker,self.root,_holiday_set,self._job_lock)
-        self.positional_scanner=PositionalScanner(self.broker,self.root,_holiday_set,self._job_lock)
+        self.nifty500=Nifty500Universe(self.broker,self.root)
+        self.positional_scanner=PositionalScanner(self.broker,self.root,_holiday_set,self._job_lock,universe=self.nifty500)
         self.qglp_research=QGLPResearch(self.root)
         self.europe_markets=EuropeMarkets()
         self.index_orderflow=IndexOrderFlow(self.broker,self.root,_holiday_set,self._job_lock)
-        self.liquidity=LiquidityShortlist(self.broker,self.root)
+        self.liquidity=LiquidityShortlist(self.broker,self.root,universe=self.nifty500)
         self.premarket_followthrough=PremarketFollowthrough(self,_holiday_set)
         self.event_center=EventCenter(self.root,self)
         self._done=set();self._thread=None;self._stop=threading.Event()
@@ -318,8 +320,10 @@ class InsightsService:
         self._shortlist_down=[x for x in self._shortlist if x.get('liquidity_change',0)<0]
         self._shortlist_finalized=True
         self._discovery_mode='SCHEDULED SESSION TURNOVER RANKING'
-        self._discovery_scanned=result.get('universe') or 0
-        self._breadth_quotes=result.get('quoted') or 0
+        membership=result.get('nifty500')
+        self._discovery_scanned=(membership.get('mapped') or 0) if membership is not None else (result.get('universe') or 0)
+        self._breadth_quotes=(result.get('intraday_quoted') or 0) if membership is not None else (result.get('quoted') or 0)
+        self._discovery_data_assessed=self._breadth_quotes
         return result
 
     def scan_swing_shortlist(self,now):

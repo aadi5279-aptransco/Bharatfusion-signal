@@ -374,7 +374,8 @@ class DhanReadOnly:
         mask=(master['EXCH_ID'].isin(['NSE','BSE'])
               & (master['SEGMENT']=='E')
               & (master['INSTRUMENT']=='EQUITY'))
-        subset=master.loc[mask,list(needed)].copy().fillna('')
+        optional={'ISIN','ASM_GSM_FLAG'} & set(master.columns)
+        subset=master.loc[mask,sorted(needed | optional)].copy().fillna('')
         # NSE regular EQ series; BSE cash series can differ.
         subset=subset[((subset.EXCH_ID=='NSE')&(subset.SERIES=='EQ'))
                       | ((subset.EXCH_ID=='BSE')&(subset.SERIES!=''))]
@@ -384,8 +385,19 @@ class DhanReadOnly:
         return [dict(symbol=row.SYMBOL_NAME,ticker='',id=row.SECURITY_ID,
                      segment='NSE_EQ' if row.EXCH_ID=='NSE' else 'BSE_EQ',
                      instrument='EQUITY',kind='stock',
-                     listed_exchange=row.EXCH_ID)
+                     listed_exchange=row.EXCH_ID,isin=str(getattr(row,'ISIN','')).strip(),
+                     asm_gsm_flag=str(getattr(row,'ASM_GSM_FLAG','')))
                 for row in subset.itertuples(index=False)]
+
+    def nifty500_instruments(self,now):
+        # Refresh the detailed master once per local date for current ISIN mappings.
+        # Existing modules retain their own universes; no option contracts are invented.
+        from data import universe
+        day=now.astimezone(IST).date()
+        if getattr(self,'_nifty_master_day',None)!=day:
+            universe(reuse=False)
+            self._nifty_master_day=day
+        return self.longterm_instruments()
 
     def instruments(self):
         # Official Dhan-hosted detailed master via pre-existing source parser.
