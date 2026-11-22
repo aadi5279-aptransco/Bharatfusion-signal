@@ -20,6 +20,8 @@ def install(source, target):
     files=sorted((source/'insights').rglob('*.py'))
     files.append(source/'tools'/'install_fii_holdings_update.py')
     files.append(source/'run_insights.py')
+    for name in ('PHASE0_CHECK.bat','PHASE0_DATA_CONTRACT.md'):
+        if (source/name).is_file():files.append(source/name)
     scheduler_test=source/'tests'/'test_staged_scheduler.py'
     if scheduler_test.is_file():files.append(scheduler_test)
     files+=sorted(p for p in (source/'web'/'src').rglob('*') if p.suffix in ('.js','.css'))

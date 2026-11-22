@@ -8,9 +8,12 @@ import base64,json,os,threading,time,math
 from datetime import datetime,timedelta
 from datetime import timezone
 import pandas as pd
-from insights.config import IST
+from insights.config import IST,ROOT
+from insights.data_layer.transport import Transport,DataError
+from insights.data_layer.client import Client
+from insights.data_layer.master import Master
 
-class BrokerUnavailable(RuntimeError):pass
+BrokerUnavailable=DataError
 
 
 def _expires_at(token):
@@ -83,6 +86,10 @@ class DhanReadOnly:
         self._history_cache={}
         self._renewal_error=''
         self._last_ok=None
+        self.transport=Transport(ROOT,lambda:(self.client_id,self._token))
+        self._profile={'status':'NOT CHECKED'}
+        self._profile_checked=0.0
+        self.master=Master(self.transport)
 
     def configured(self):return bool(self.client_id and self._token)
 
@@ -94,15 +101,12 @@ class DhanReadOnly:
                 self._renew_token()
             elif expiry and expiry<=time.time():raise BrokerUnavailable('Dhan token expired; renew it in Dhan Web')
             if self._client is None:
-                try:from dhanhq import DhanContext,dhanhq
-                except ImportError:raise BrokerUnavailable('Install the official dhanhq package') from None
-                self._client=dhanhq(DhanContext(self.client_id,self._token))
+                self._client=Client(self.transport)
             return self._client
 
     def _renew_token(self):
         try:
-            from dhanhq import DhanLogin
-            response=DhanLogin(self.client_id).renew_token(self._token)
+            response=self.transport.request('GET','/RenewToken')
             data=response.get('data',response) if isinstance(response,dict) else {}
             token=data.get('accessToken') or data.get('access_token')
             if not token:raise ValueError('No replacement token')
@@ -110,6 +114,24 @@ class DhanReadOnly:
         except Exception:
             self._renewal_error='Automatic token renewal failed. Reauthenticate in Dhan Web.'
             raise BrokerUnavailable(self._renewal_error) from None
+
+    def check_profile(self):
+        """Only public status fields are returned; client ID/token never reach the UI."""
+        if time.monotonic()-self._profile_checked<60:return dict(self._profile)
+        self._profile_checked=time.monotonic()
+        try:
+            self._sdk()
+            raw=self.transport.request('GET','/profile');raw=raw.get('data',raw)
+            if not isinstance(raw,dict) or 'dataPlan' not in raw:raise BrokerUnavailable('Profile schema unavailable')
+            self._profile=dict(status='VERIFIED RESPONSE' if str(raw.get('dataPlan','')).lower()=='active' else 'DATA PLAN INACTIVE',data_plan=raw.get('dataPlan'),data_validity=raw.get('dataValidity'),token_validity=raw.get('tokenValidity'),checked_at=datetime.now(IST).isoformat())
+        except BrokerUnavailable as exc:self._profile=dict(status='UNAVAILABLE',error=str(exc),checked_at=datetime.now(IST).isoformat())
+        return dict(self._profile)
+
+    def data_status(self):
+        quality=self._client.history.last_quality if isinstance(self._client,Client) else {}
+        return dict(profile=dict(self._profile),quota=self.transport.status(),quality=dict(quality),master=dict(self.master.status),
+                    adjustment_status='UNVERIFIED — no automatic corporate-action adjustment',
+                    live_validation='NOT CERTIFIED; run PHASE0_CHECK.bat locally')
 
     def _check(self,result):
         if not isinstance(result,dict) or result.get('status')=='failure':
@@ -231,13 +253,8 @@ class DhanReadOnly:
                 try:groups.setdefault(str(item['segment']),[]).append(int(item['id']))
                 except (TypeError,ValueError):continue
         if not groups:return {}
-        req=Request('https://api.dhan.co/v2/marketfeed/quote',
-            data=json.dumps(groups).encode('utf-8'),
-            headers={'Content-Type':'application/json','Accept':'application/json',
-                     'access-token':self._token,'client-id':str(self.client_id)},
-            method='POST')
         try:
-            with urlopen(req,timeout=20) as resp:data=json.load(resp)
+            data=self.transport.request('POST','/marketfeed/quote',groups)
             raw=self._unwrap_sdk_data(self._check(data))
         except Exception:return {}
         if not isinstance(raw,dict):return {}
@@ -283,14 +300,8 @@ class DhanReadOnly:
             if item.get('segment') and item.get('id'):
                 payload.setdefault(str(item['segment']),[]).append(int(item['id']))
         if not payload:return {}
-        body=json.dumps(payload).encode('utf-8')
-        req=Request('https://api.dhan.co/v2/marketfeed/quote',data=body,
-                    headers={'Content-Type':'application/json',
-                             'Accept':'application/json','access-token':self._token,
-                             'client-id':str(self.client_id)},method='POST')
         try:
-            with urlopen(req,timeout=20) as resp:
-                obj=json.load(resp)
+            obj=self.transport.request('POST','/marketfeed/quote',payload)
             data=self._unwrap_sdk_data(self._check(obj))
         except Exception:
             return {}  # optional evidence only; never block price-only analysis
@@ -398,12 +409,14 @@ class DhanReadOnly:
         from data import universe
         day=now.astimezone(IST).date()
         if getattr(self,'_nifty_master_day',None)!=day:
-            universe(reuse=False)
+            self.instruments()
             self._nifty_master_day=day
         return self.longterm_instruments()
 
     def instruments(self):
         # Official Dhan-hosted detailed master via pre-existing source parser.
-        from data import universe
-        return universe(reuse=True)
+        import data as legacy_data
+        legacy_data._MASTER=self.master.load()
+        try:return legacy_data.parse_master(legacy_data._MASTER)
+        except Exception:raise BrokerUnavailable('Official instrument mapping failed; inspect master schema') from None
 
