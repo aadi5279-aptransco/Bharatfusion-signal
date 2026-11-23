@@ -103,3 +103,15 @@ Transport exceptions retain only validated numeric provider/HTTP codes. Raw prov
 **Follow-up verification is pending.** The execution environment was unavailable; eight new regression tests were added but not executed here. The earlier 399+3 results apply only to the initial commit. Run the existing update script's full tests before starting the app.
 
 These changes improve evidence and diagnostics. They do not establish the cause of the missing index-futures mapping, repair provider history gaps, shift timestamps, fill missing bars, or certify special sessions. The adapter's existing candle filtering is unchanged pending executable regression checks and provider evidence. Phase 0 acceptance remains open; Phase 1 is paused.
+
+## Report comparison and request-boundary correction — 23 November 2026
+
+Reviewed the user's 09:57 IST report: three checks PASS, three UNAVAILABLE, forty REVIEW. The latest 1-minute candles end at 09:56 and 5-minute candles at 09:50. This supplies a live-session sample, not a full-session soak test.
+
+A checker defect counted candles before the actual seven-day request start as missing. Coverage now excludes those timestamps using the explicit requested start; it does not infer that missing leading data is acceptable from the first returned candle. Two new regression tests verify that request truncation is excluded while missing end-of-day candles remain flagged.
+
+Remaining observed issues: BANKNIFTY futures mapping absent; ATM CE and PE daily requests return HTTP_400; stock historical sessions have missing end-of-day candles; derivative timestamp/session anomalies remain. The 200-bar research warning is expected for the short diagnostic windows and does not itself establish provider failure. Contract identity and raw-response evidence are still needed before changing mappings or timestamp semantics.
+
+Verification: 30 focused Phase 0 tests and 3 root tests passed locally. Full-suite rerun status is recorded below. No new authenticated Dhan calls were made in this workspace.
+
+Full-suite rerun after restoring workspace Flask/websocket dependencies: 409 Insights tests passed; 3 root tests passed; Python compile check passed. The earlier eight evidence tests are now executed successfully, plus two request-boundary regressions. Frontend code was unchanged in this correction.

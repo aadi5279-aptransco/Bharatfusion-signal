@@ -9,13 +9,14 @@ def result_status(result):
         return 'REVIEW'
     return 'PASS'
 
-def candle_evidence(frame, period, now, item, download_quality=None):
+def candle_evidence(frame, period, now, item, download_quality=None, requested_start=None):
     if frame.empty:
         raise ValueError('Empty candle result')
     if not isinstance(frame.index, pd.DatetimeIndex) or frame.index.tz is None:
         raise ValueError('Timezone-aware DatetimeIndex required')
     stamps = frame.index.tz_convert(IST)
     now = pd.Timestamp(now).tz_convert(IST)
+    requested_start = pd.Timestamp(requested_start).tz_convert(IST) if requested_start is not None else None
     warnings = []
     if not stamps.is_monotonic_increasing or stamps.has_duplicates:
         warnings.append('UNSORTED_OR_DUPLICATE_TIMESTAMPS')
@@ -45,6 +46,8 @@ def candle_evidence(frame, period, now, item, download_quality=None):
             until = min(close, now)
             expected = pd.date_range(start, close, freq=str(period)+'min', inclusive='left')
             expected = expected[expected + pd.Timedelta(minutes=period) <= until]
+            if requested_start is not None:
+                expected = expected[expected >= requested_start]
             missing = expected.difference(observed)
             sessions.append(dict(date=str(day), rows=len(observed),
                 first=observed[0].isoformat(), last=observed[-1].isoformat(),
@@ -54,7 +57,7 @@ def candle_evidence(frame, period, now, item, download_quality=None):
         if any(s['missing_full_grid_bars'] for s in sessions):
             warnings.append('OBSERVED_SESSION_COVERAGE_INCOMPLETE')
     quality = dict(rows=len(frame), first=stamps[0].isoformat(), last=stamps[-1].isoformat(),
-        timezone=str(stamps.tz), zero_volume=int((frame['volume'] == 0).sum()),
+        timezone=str(stamps.tz), requested_start=requested_start.isoformat() if requested_start is not None else None, zero_volume=int((frame['volume'] == 0).sum()),
         sessions=sessions, coverage_scope='Observed dates only; holidays and special sessions not certified')
     return dict(rows=len(frame), first=quality['first'], last=quality['last'],
         timezone=quality['timezone'], oi_available='oi' in frame,

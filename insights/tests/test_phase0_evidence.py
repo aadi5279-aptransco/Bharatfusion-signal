@@ -15,6 +15,16 @@ NOW=pd.Timestamp('2026-11-22 22:52',tz=IST)
 ITEM=dict(id='fixture-id',segment='NSE_EQ',instrument='EQUITY',kind='stock')
 
 class ReportEvidenceTests(unittest.TestCase):
+    def test_request_boundary_does_not_invent_missing_morning(self):
+        f=bars(pd.date_range('2026-11-16 10:00',periods=66,freq='5min',tz=IST))
+        r=candle_evidence(f,5,NOW,ITEM,requested_start=pd.Timestamp('2026-11-16 09:57:23',tz=IST))
+        self.assertEqual(r['returned_quality']['sessions'][0]['missing_full_grid_bars'],0)
+        self.assertNotIn('OBSERVED_SESSION_COVERAGE_INCOMPLETE',r['warnings'])
+    def test_boundary_exclusion_preserves_missing_tail(self):
+        f=bars(pd.date_range('2026-11-16 10:00',periods=63,freq='5min',tz=IST))
+        r=candle_evidence(f,5,NOW,ITEM,requested_start=pd.Timestamp('2026-11-16 09:57:23',tz=IST))
+        self.assertEqual(r['returned_quality']['sessions'][0]['missing_full_grid_bars'],3)
+        self.assertIn('OBSERVED_SESSION_COVERAGE_INCOMPLETE',r['warnings'])
     def test_null_mapping_never_passes(self):
         self.assertEqual(result_status(None),'UNAVAILABLE')
     def test_missing_tail_is_detected_without_internal_gap(self):

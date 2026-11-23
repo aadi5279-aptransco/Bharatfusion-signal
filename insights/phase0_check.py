@@ -1,7 +1,7 @@
 """Local read-only evidence collection. Default never contacts Dhan."""
 import argparse,json,os,re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime,timedelta
 from insights.config import IST,ROOT
 from insights.brokers.dhan import DhanReadOnly
 from insights.data_layer.evidence import candle_evidence,result_status
@@ -59,7 +59,7 @@ def run(live=False):
     def candles(item,period):
         f=b.daily(item,now,days=60,oi=item.get('kind') in ('future','option')) if period==1440 else b.history(item,now,minutes=period,lookback_days=7,oi=item.get('kind') in ('future','option'))
         if f.empty:raise ValueError()
-        return candle_evidence(f,period,now,item,b.data_status()['quality'])
+        return candle_evidence(f,period,now,item,b.data_status()['quality'],requested_start=now-timedelta(days=7) if period<1440 else None)
     for item in samples:
         for period in (1440,1,5,15,25,60):check(item['symbol']+' '+str(period)+'m',lambda i=item,p=period:candles(i,p))
     report['data_layer']=b.data_status();report['real_dhan_calls_run']=True;report['smoke_checks_passed']=bool(report['checks']) and all(x['status']=='PASS' for x in report['checks'])
