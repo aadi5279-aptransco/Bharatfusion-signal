@@ -115,3 +115,11 @@ Remaining observed issues: BANKNIFTY futures mapping absent; ATM CE and PE daily
 Verification: 30 focused Phase 0 tests and 3 root tests passed locally. Full-suite rerun status is recorded below. No new authenticated Dhan calls were made in this workspace.
 
 Full-suite rerun after restoring workspace Flask/websocket dependencies: 409 Insights tests passed; 3 root tests passed; Python compile check passed. The earlier eight evidence tests are now executed successfully, plus two request-boundary regressions. Frontend code was unchanged in this correction.
+
+## Mapping and daily option request correction — 23 November 2026
+
+The index-futures resolver now normalizes master IDs/whitespace, restricts known indices to their exchange, and permits an exact UNDERLYING_SYMBOL alias match only if candidate underlying IDs are absent or placeholders. An explicit conflicting ID, conflicting symbol, or multiple contracts at the nearest expiry still blocks mapping. No contract display-name substring matching or hardcoded security IDs are used. The result records its mapping method and official master fields.
+
+Daily option requests now omit optional expiryCode. Futures requests retain it. This follows Dhan's instrument documentation, which describes expiry code as applicable to futures contracts: https://dhanhq.co/docs/v2/instruments/ . It is a candidate correction for the reported HTTP_400, not proof of its cause. Rejected requests continue to report UNAVAILABLE; they are not relabelled PASS and no synthetic daily data replaces the response.
+
+Ten regression tests and a credential-free GitHub Actions workflow are included. The local execution environment was unavailable for this revision. Previous 409+3 results apply to the preceding commit, not this change. Check the PR's new CI result and run UPDATE_PHASE0.bat locally before use. Real-Dhan validation of both changes remains pending. Full Phase 0 acceptance is not claimed.

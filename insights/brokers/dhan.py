@@ -179,7 +179,7 @@ class DhanReadOnly:
         until=now+timedelta(days=1) if completed_today else now
         raw=self._check(self._sdk().historical_daily_data(
             security_id=str(item['id']),exchange_segment=item['segment'],instrument_type=item['instrument'],
-            from_date=start.strftime('%Y-%m-%d'),to_date=until.strftime('%Y-%m-%d'),expiry_code=0,oi=oi))
+            from_date=start.strftime('%Y-%m-%d'),to_date=until.strftime('%Y-%m-%d'),expiry_code=None if item.get('instrument') in ('OPTIDX','OPTSTK') else 0,oi=oi))
         try:
             cols=['open','high','low','close','volume']
             frame=pd.DataFrame({k:raw[k] for k in cols},
@@ -338,36 +338,13 @@ class DhanReadOnly:
         return results
 
     def index_future(self,item,now=None):
-        """Map a genuine FUTIDX by exact Dhan underlying security ID.
-
-        Never substitute index spot OHLC for futures OI, and do not match
-        unrelated contracts by similar-sounding instrument symbols.
-        """
+        """Resolve genuine FUTIDX contracts; reject ambiguous/conflicting master rows."""
         import data as legacy_data
+        from insights.data_layer.contracts import resolve_index_future
         if getattr(legacy_data,'_MASTER',None) is None:
             self.instruments()
-        raw=getattr(legacy_data,'_MASTER',None)
-        if raw is None:return None
-        need={'EXCH_ID','INSTRUMENT','SECURITY_ID',
-              'UNDERLYING_SECURITY_ID','SM_EXPIRY_DATE'}
-        if not need.issubset(raw.columns):return None
-        now=(now or datetime.now(IST)).astimezone(IST)
-        source=str(item.get('id','')).removesuffix('.0')
-        if not source:return None
-        cleaned=raw.UNDERLYING_SECURITY_ID.fillna('').astype(str).str.removesuffix('.0')
-        candidates=raw.loc[(raw.INSTRUMENT=='FUTIDX') & (cleaned==source)].copy()
-        if candidates.empty:return None
-        candidates['exp']=pd.to_datetime(
-            candidates.SM_EXPIRY_DATE,errors='coerce',utc=True)
-        candidates=candidates[candidates['exp'].dt.date>=now.date()]
-        if candidates.empty:return None
-        row=candidates.sort_values('exp').iloc[0]
-        segment={'NSE':'NSE_FNO','BSE':'BSE_FNO'}.get(str(row.EXCH_ID))
-        if not segment:return None
-        return dict(id=str(row.SECURITY_ID),segment=segment,
-                    instrument='FUTIDX',expiry=row.exp.date().isoformat(),
-                    symbol=str(row.get('SYMBOL_NAME','INDEX-FUTIDX')),
-                    tick_size=(float(row['TICK_SIZE']) if str(row.get('TICK_SIZE','')).replace('.','',1).isdigit() and math.isfinite(float(row['TICK_SIZE'])) and float(row['TICK_SIZE'])>0 else None))
+        return resolve_index_future(getattr(legacy_data,'_MASTER',None),item,
+                                    now or datetime.now(IST))
 
     def longterm_instruments(self):
         """NSE/BSE listed cash equities from the existing official Dhan master.
