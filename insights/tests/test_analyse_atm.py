@@ -4,6 +4,7 @@ Synthetic, offline fixtures: no real quotes or claimed backtest accuracy.
 """
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime
 import pandas as pd
 from insights.config import IST
@@ -96,6 +97,14 @@ class ATMTests(unittest.TestCase):
         self.assertEqual(report['direction'],'PE')
         self.assertIsNone(report['entry'])
         self.assertIn('UNCONFIRMED',report['status'])
+    def test_choices_on_fresh_machine_do_not_return_empty_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            svc=InsightsService(AnalyseATMBroker(),directory)
+            with patch('insights.service.time.monotonic',return_value=1.0):
+                result=svc.analyse_choices(NOW)
+            self.assertIn('fno_symbols',result)
+            self.assertEqual(result['fno_symbols'][0]['ticker'],'BAJFINANCE')
+
     def test_manual_fno_future_root_resolves(self):
         with tempfile.TemporaryDirectory() as directory:
             svc=InsightsService(AnalyseATMBroker(),directory)

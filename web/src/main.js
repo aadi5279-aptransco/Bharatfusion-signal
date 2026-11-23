@@ -1,3 +1,4 @@
+import DataHealth from './data_health';
 import IndexPremium from './index_premium';
 import UniverseCoverage from './universe';
 import React, {useEffect,useMemo,useRef,useState} from 'react';
@@ -998,7 +999,7 @@ function App(){
   e('div',{className:'workspace'},
    e('header',{className:'topbar'},e('div',null,e('small',{className:'muted'},'BHARATSIGNAL / MARKET INSIGHTS'),e('h1',null,active)),
     e('div',{className:'top-actions'},e(Badge,{type:'positive'},'NO ORDER PLACEMENT'),e(Badge,null,'DHAN · '+health.status),e('button',{className:'theme-btn',onClick:()=>setTheme(theme==='dark'?'light':'dark')},theme==='dark'?'☀ Light':'☾ Dark'),e('button',{className:'theme-btn',onClick:onExit,disabled:exitState==='busy',title:'Stop the local app and background scans'},exitState==='busy'?'Exiting…':'Logout / Exit'))),
-   e('main',{className:'content'},exitError?e(Notice,{warning:true},exitError):null,e(NotificationCenter,{onOpen:select}),e(Notice,{warning:true},RISK),
+   e('main',{className:'content'},exitError?e(Notice,{warning:true},exitError):null,e(NotificationCenter,{onOpen:select}),e(Notice,{warning:true},RISK),e(DataHealth,{data:health.data_layer}),
     error?e(Notice,{warning:true},error):null,
     ['Intraday','F&O Stocks','Swing Trades'].includes(active)?e(Section,{title:'Scheduled liquidity shortlist'},
      e('p',null,'Broad discovery: 09:45, 10:00, 11:00, 12:00, 13:00, 14:00, 15:00 IST. Strategy checks: every 5 minutes on stored selections only.'),

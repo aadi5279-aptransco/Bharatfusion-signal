@@ -1,0 +1,28 @@
+name: Phase 0 validation
+on:
+  pull_request:
+    paths:
+      - 'insights/**'
+      - 'tests/**'
+      - 'requirements*.txt'
+      - '.github/workflows/phase0-validation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install application test dependencies
+        run: python -m pip install -r requirements-insights.txt -r requirements-orderflow.txt
+      - name: Compile data adapter
+        run: python -m compileall -q insights
+      - name: Insights regression suite
+        run: python -m unittest discover -s insights/tests -q
+      - name: Core regression suite
+        run: python -m unittest discover -s tests -q

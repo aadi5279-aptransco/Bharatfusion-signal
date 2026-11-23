@@ -67,9 +67,9 @@ class UniverseTests(unittest.TestCase):
     def test_dhan_master_refresh_once_per_date(self):
         from insights.brokers.dhan import DhanReadOnly
         b=DhanReadOnly();b.longterm_instruments=Mock(return_value=equities())
-        with patch('data.universe') as master:
+        with patch.object(b,'instruments') as master:
             b.nifty500_instruments(NOW);b.nifty500_instruments(NOW+timedelta(minutes=5))
-            master.assert_called_once_with(reuse=False)
+            master.assert_called_once_with()
             b.nifty500_instruments(NOW+timedelta(days=1));self.assertEqual(master.call_count,2)
 
 class LiquidityUniverseTests(unittest.TestCase):

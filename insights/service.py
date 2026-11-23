@@ -204,7 +204,7 @@ class InsightsService:
 
     def health(self):
         with self._lock:return dict(status=('CONNECTED' if getattr(self.broker,'_last_ok',None) and time.monotonic()-self.broker._last_ok<600 else 'CONFIGURED — UNVERIFIED') if self.broker.configured() else 'NEEDS_DHAN_CONFIGURATION',
-          source='DHAN',read_only=True,orders_enabled=False,updated_at=dict(self._timestamps),last_error=self._last_error,
+          source='DHAN',read_only=True,orders_enabled=False,data_layer=self.broker.data_status() if callable(getattr(self.broker,'data_status',None)) else {},updated_at=dict(self._timestamps),last_error=self._last_error,
           holiday_calendar='CONFIGURED' if _holiday_set() is not None else 'NOT CONFIGURED — scans blocked',
           manual_refresh=dict(self._manual_refresh),disclaimer=DISCLAIMER)
 
@@ -766,7 +766,7 @@ class InsightsService:
         now=now or datetime.now(IST)
         tick=time.monotonic()
         with self._lock:
-            if tick-self._analyse_choices_cache[0]<60:
+            if self._analyse_choices_cache[1] and 0<=tick-self._analyse_choices_cache[0]<60:
                 return dict(self._analyse_choices_cache[1])
         result=analyse_workflow.choices(self,now,_holiday_set())
         with self._lock:self._analyse_choices_cache=(tick,result)
@@ -1486,7 +1486,9 @@ class InsightsService:
                 # independent worker; no intraday scanner lock/network.
                 try:self.fii_deals_manager.start()
                 except Exception:pass
-                try:self.run_due()
+                try:
+                    if callable(getattr(self.broker,'check_profile',None)):self.broker.check_profile()
+                    self.run_due()
                 except Exception:
                     with self._lock:self._last_error='Unexpected scan error (no orders sent)'
                 self._stop.wait(20)
