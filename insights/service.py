@@ -766,7 +766,7 @@ class InsightsService:
         now=now or datetime.now(IST)
         tick=time.monotonic()
         with self._lock:
-            if tick-self._analyse_choices_cache[0]<60:
+            if self._analyse_choices_cache[1] and 0<=tick-self._analyse_choices_cache[0]<60:
                 return dict(self._analyse_choices_cache[1])
         result=analyse_workflow.choices(self,now,_holiday_set())
         with self._lock:self._analyse_choices_cache=(tick,result)
