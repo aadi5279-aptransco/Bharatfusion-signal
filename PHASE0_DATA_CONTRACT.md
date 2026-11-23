@@ -57,7 +57,7 @@ Quota counters survive restarts and include each retry. Data plus chain calls sh
 - Quarantine response fingerprint/array-length metadata, not authenticated raw responses or secrets. No chunk checkpoint is committed for rejected responses.
 - Market data remains unadjusted/as reported until independent corporate-action evidence is supplied. No synthetic adjustment layer is promoted.
 
-## Offline verification
+## Offline verification of initial commit 283da1b
 
 - 399 Market Insights tests passed, including 20 Phase 0 transport/cache/fault tests.
 - 3 root tests passed.
@@ -91,3 +91,15 @@ The old strategy code and legacy launcher are not declared fully audited by this
 Do not delete existing journal databases. The new `dhan_data.sqlite` contains market data, validation metadata and local quota accounting. Clearing it also clears local quota history, so it is not a quota-reset mechanism.
 
 After evidence review, stop for approval before Phase 1.
+
+## Follow-up diagnostic correction — 23 November 2026
+
+The user's local report dated 22 November confirms authenticated read calls, an active data plan, instrument-master retrieval and successful candle/option-chain responses. This is user-supplied smoke evidence, not full-session certification.
+
+The follow-up fixes missing mappings being marked PASS, requests daily derivative OI, records expiry/strike/side/security ID for option samples, and distinguishes download metadata from returned-frame coverage. Observed-date regular-grid checks now flag missing tails, off-grid timestamps, outside-session observations and partial end-of-session bars. A 200-bar research baseline is disclosed separately from strategy readiness; it is not a universal indicator requirement. Sparse data is REVIEW, not an unconditional PASS.
+
+Transport exceptions retain only validated numeric provider/HTTP codes. Raw provider messages and credentials are not written to the report.
+
+**Follow-up verification is pending.** The execution environment was unavailable; eight new regression tests were added but not executed here. The earlier 399+3 results apply only to the initial commit. Run the existing update script's full tests before starting the app.
+
+These changes improve evidence and diagnostics. They do not establish the cause of the missing index-futures mapping, repair provider history gaps, shift timestamps, fill missing bars, or certify special sessions. The adapter's existing candle filtering is unchanged pending executable regression checks and provider evidence. Phase 0 acceptance remains open; Phase 1 is paused.

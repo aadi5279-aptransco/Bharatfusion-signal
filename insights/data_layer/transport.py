@@ -1,5 +1,5 @@
 """Exact endpoint allow-list, conservative token buckets and durable quota accounting."""
-import json,random,sqlite3,threading,time
+import json,random,sqlite3,threading,time,re
 from pathlib import Path
 from datetime import datetime
 from urllib.request import Request,build_opener,HTTPRedirectHandler
@@ -11,7 +11,10 @@ ALLOWED={('GET','/profile'):'profile',('GET','/RenewToken'):'profile',
  ('POST','/optionchain'):'chain',('POST','/optionchain/expirylist'):'chain',
  ('POST','/marketfeed/quote'):'quote'}
 LIMITS={'data':4.0,'quote':.9,'chain':1/3.1,'profile':2.0}
-class DataError(RuntimeError):pass
+class DataError(RuntimeError):
+    def __init__(self,message,code='DATA_ERROR'):
+        super().__init__(message)
+        self.code=code if re.fullmatch(r'(?:DH-)?[0-9]{3}|HTTP_[0-9]{3}|DATA_ERROR|AUTH_REJECTED|CONNECTION_UNAVAILABLE',str(code)) else 'DATA_ERROR'
 class ReadOnlyViolation(DataError):pass
 
 class NoRedirect(HTTPRedirectHandler):
@@ -74,17 +77,18 @@ class Transport:
                 if obj.get('status')=='failure':
                     remarks=obj.get('remarks');code=str(obj.get('errorCode') or (remarks.get('error_code','') if isinstance(remarks,dict) else ''))
                     if code in ('805','DH-805','429'):raise HTTPError('',429,'rate limit',{},None)
-                    raise DataError('Dhan rejected request; check token, subscription and instrument mapping')
+                    raise DataError('Dhan rejected request; check token, subscription and instrument mapping',code=code)
                 self.last_error='';self.last_success=datetime.now(IST).isoformat();return obj
             except HTTPError as exc:
                 if exc.code in (401,403):
-                    self.last_error='Authentication/entitlement rejected; check token and Data API plan';raise DataError(self.last_error) from None
+                    self.last_error='Authentication/entitlement rejected; check token and Data API plan';raise DataError(self.last_error,code='AUTH_REJECTED') from None
                 retry=exc.code==429 or 500<=exc.code<600
                 message=f'Dhan HTTP {exc.code}; no response body or credentials logged'
+                error_code=f'HTTP_{exc.code}'
                 header=exc.headers.get('Retry-After','') if exc.headers else ''
                 try:delay=min(30,max(0,float(header)))
                 except (TypeError,ValueError):delay=0
-            except (URLError,TimeoutError,OSError):retry=True;message='Dhan connection timeout/unavailable';delay=0
+            except (URLError,TimeoutError,OSError):retry=True;message='Dhan connection timeout/unavailable';delay=0;error_code='CONNECTION_UNAVAILABLE'
             except DataError as exc:self.last_error=str(exc);raise
-            if not retry or attempt==3:self.last_error=message;raise DataError(message) from None
+            if not retry or attempt==3:self.last_error=message;raise DataError(message,code=error_code) from None
             self.sleep(max(delay,min(8,2**attempt)+random.uniform(0,.25)))
