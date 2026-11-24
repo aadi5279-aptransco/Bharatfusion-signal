@@ -4,6 +4,7 @@ on:
     paths:
       - 'insights/**'
       - 'patterns/**'
+      - 'web/**'
       - 'tests/**'
       - 'requirements*.txt'
       - '.github/workflows/phase0-validation.yml'
@@ -52,4 +53,4 @@ jobs:
           node-version: '22'
       - name: Build interface
         working-directory: web
-        run: npm ci && npm run build
+        run: npm install --no-audit --no-fund && npm run build
