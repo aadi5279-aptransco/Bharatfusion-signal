@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import sqlite3
+from contextlib import closing
 from datetime import timedelta
 from pathlib import Path
 import pandas as pd
@@ -80,7 +81,7 @@ class DatasetStore:
     def save(self,payload):
         encoded=canonical(payload);digest=hashlib.sha256(encoded.encode()).hexdigest()
         self.path.parent.mkdir(parents=True,exist_ok=True)
-        with sqlite3.connect(self.path,timeout=10) as db:
+        with closing(sqlite3.connect(self.path,timeout=10)) as db, db:
             db.execute('CREATE TABLE IF NOT EXISTS snapshots (digest TEXT PRIMARY KEY, payload TEXT NOT NULL)')
             db.execute("CREATE TRIGGER IF NOT EXISTS no_snapshot_update BEFORE UPDATE ON snapshots BEGIN SELECT RAISE(ABORT,'immutable snapshot'); END")
             db.execute("CREATE TRIGGER IF NOT EXISTS no_snapshot_delete BEFORE DELETE ON snapshots BEGIN SELECT RAISE(ABORT,'immutable snapshot'); END")
@@ -91,7 +92,7 @@ class DatasetStore:
         if not isinstance(digest,str) or len(digest)!=64 or any(c not in '0123456789abcdef' for c in digest):
             raise ValueError('Invalid dataset ID')
         if not self.path.exists():raise ValueError('Dataset not found')
-        with sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True) as db:
+        with closing(sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True)) as db:
             row=db.execute('SELECT payload FROM snapshots WHERE digest=?',(digest,)).fetchone()
         if row is None:raise ValueError('Dataset not found')
         if hashlib.sha256(row[0].encode()).hexdigest()!=digest:raise ValueError('Dataset integrity check failed')
@@ -99,7 +100,7 @@ class DatasetStore:
 
     def inventory(self):
         if not self.path.exists():return []
-        with sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True) as db:
+        with closing(sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True)) as db:
             ids=[r[0] for r in db.execute('SELECT digest FROM snapshots ORDER BY rowid DESC LIMIT 30')]
         return [dict(self.read(d)['manifest'],dataset_id=d) for d in ids]
 

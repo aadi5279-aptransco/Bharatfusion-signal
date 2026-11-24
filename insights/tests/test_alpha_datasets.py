@@ -2,6 +2,7 @@ import unittest
 import tempfile
 import threading
 import hashlib
+import sqlite3
 from pathlib import Path
 from datetime import datetime,timedelta,timezone
 from unittest.mock import Mock,patch
@@ -16,6 +17,51 @@ def frame():
     return pd.DataFrame(dict(open=100.,high=102.,low=99.,close=101.,volume=10000.),index=ix)
 
 class DatasetTests(unittest.TestCase):
+    def test_connections_close_after_save_read_and_inventory(self):
+        real_connect=sqlite3.connect;opened=[]
+        def tracked(*args,**kwargs):
+            db=real_connect(*args,**kwargs);opened.append(db);return db
+        with tempfile.TemporaryDirectory() as tmp:
+            s=DatasetStore(Path(tmp)/'closed.sqlite')
+            with patch('insights.alpha.datasets.sqlite3.connect',side_effect=tracked):
+                result=s.save(prepare(frame(),ITEM,T,7))
+                s.read(result['dataset_id']);s.inventory()
+            self.assertEqual(len(opened),4)
+            for db in opened:
+                with self.assertRaises(sqlite3.ProgrammingError):db.execute('SELECT 1')
+            # Keep references alive: cleanup must not depend on garbage collection.
+            s.path.unlink()
+
+    def test_connections_close_on_query_error(self):
+        real_connect=sqlite3.connect;opened=[]
+        def tracked(*args,**kwargs):
+            db=real_connect(*args,**kwargs);opened.append(db);return db
+        with tempfile.TemporaryDirectory() as tmp:
+            s=DatasetStore(Path(tmp)/'empty.sqlite');s.path.touch()
+            with patch('insights.alpha.datasets.sqlite3.connect',side_effect=tracked):
+                with self.assertRaises(sqlite3.OperationalError):s.read('a'*64)
+                with self.assertRaises(sqlite3.OperationalError):s.inventory()
+            for db in opened:
+                with self.assertRaises(sqlite3.ProgrammingError):db.execute('SELECT 1')
+            s.path.unlink()
+
+    def test_failed_save_rolls_back_and_closes(self):
+        real_connect=sqlite3.connect;opened=[]
+        class BrokenConnection(sqlite3.Connection):
+            def execute(self,sql,*args,**kwargs):
+                result=super().execute(sql,*args,**kwargs)
+                if sql.startswith('INSERT OR IGNORE'):raise RuntimeError('injected write failure')
+                return result
+        def tracked(*args,**kwargs):
+            db=real_connect(*args,factory=BrokenConnection,**kwargs);opened.append(db);return db
+        with tempfile.TemporaryDirectory() as tmp:
+            s=DatasetStore(Path(tmp)/'rollback.sqlite')
+            with patch('insights.alpha.datasets.sqlite3.connect',side_effect=tracked):
+                with self.assertRaises(RuntimeError):s.save(prepare(frame(),ITEM,T,7))
+            with self.assertRaises(sqlite3.ProgrammingError):opened[0].execute('SELECT 1')
+            self.assertEqual(s.inventory(),[])
+            s.path.unlink()
+
     def test_snapshot_provenance_and_quarantine(self):
         f=frame();f.iloc[1,0]=float('nan');f.iloc[2,4]=0
         p=prepare(f,dict(ITEM,token='never-save'),T,7)
