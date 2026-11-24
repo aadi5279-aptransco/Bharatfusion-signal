@@ -17,7 +17,27 @@ def create_app(service=None):
     @app.get('/api/v1/market-insights/model-health')
     def model_health():
         from insights.alpha import health
-        return jsonify(health())
+        from insights.alpha.datasets import DatasetStore
+        try:return jsonify(**health(),datasets=DatasetStore().inventory())
+        except Exception:return jsonify(error='Research dataset inventory unavailable; inspect local storage'),503
+
+    @app.post('/api/v1/market-insights/research/capture')
+    def research_capture():
+        from insights.alpha.datasets import capture
+        if request.remote_addr not in ('127.0.0.1','::1'):
+            return jsonify(error='Local requests only'),403
+        from urllib.parse import urlsplit
+        if urlsplit(request.host_url).hostname not in ('127.0.0.1','localhost','::1'):
+            return jsonify(error='Local host required'),403
+        origin=request.headers.get('Origin')
+        if origin and origin!=request.host_url.rstrip('/'):
+            return jsonify(error='Same-origin requests only'),403
+        body=request.get_json(silent=True)
+        if not isinstance(body,dict) or set(body)!={'symbol','days'}:
+            return jsonify(error='Provide symbol and days'),400
+        try:return jsonify(capture(service,body['symbol'],body['days'],datetime.now(IST)))
+        except ValueError as exc:return jsonify(error=str(exc)[:160]),400
+        except Exception:return jsonify(error='Snapshot failed; check Dhan data access and local storage. No dataset was certified.'),503
     from insights.app_controls import register
     register(app)
     @app.before_request
