@@ -1,3 +1,4 @@
+import ModelHealth from './model_health.js';
 import PatternInspector from './patterns.js';
 import DataHealth from './data_health';
 import IndexPremium from './index_premium';
@@ -17,8 +18,8 @@ import IndexScanStatus from './index_scan_status.js';
 import {NotificationCenter} from './event_center.js';
 const e=React.createElement;
 const RISK='Rule-based analytics, not investment advice. Entries and targets are not guaranteed. Trading carries risk of loss. No orders are placed.';
-const tabs=[['Dashboard','▦'],['Scanner','▤'],['Positional','◈'],['Analyse','⌕'],['Pre-Market 8 AM','☼'],['Intraday','↗'],['BTST','◷'],['FII Stock Deals','⇄'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤']];
-const route={'Scanner':'scanner','Positional':'positional','Dashboard':'dashboard','Analyse':'analyse','Pre-Market 8 AM':'pre-market','Intraday':'intraday','BTST':'btst','FII Stock Deals':'fii-stock-deals','Index Options':'index-options','F&O Stocks':'fo-stocks','Swing Trades':'swing-trades','Multibagger':'multibagger','Track Record':'track-record'};
+const tabs=[['Dashboard','▦'],['Scanner','▤'],['Positional','◈'],['Analyse','⌕'],['Pre-Market 8 AM','☼'],['Intraday','↗'],['BTST','◷'],['FII Stock Deals','⇄'],['Index Options','⌁'],['F&O Stocks','≋'],['Swing Trades','↝'],['Multibagger','✦'],['Track Record','▤'],['Model Health','◉']];
+const route={'Model Health':'model-health','Scanner':'scanner','Positional':'positional','Dashboard':'dashboard','Analyse':'analyse','Pre-Market 8 AM':'pre-market','Intraday':'intraday','BTST':'btst','FII Stock Deals':'fii-stock-deals','Index Options':'index-options','F&O Stocks':'fo-stocks','Swing Trades':'swing-trades','Multibagger':'multibagger','Track Record':'track-record'};
 async function api(url,options={}){const res=await fetch(url,{...options,headers:{Accept:'application/json',...(options.headers||{})},cache:'no-store'});const body=await res.json();if(!res.ok)throw Error(body.error||`HTTP ${res.status}`);return body;}
 function Text({children,muted=false}){return e('span',{className:muted?'muted':''},children);}
 function Badge({children,type=''}){return e('span',{className:`badge ${type}`},children);}
@@ -1011,6 +1012,7 @@ function App(){
      active==='Intraday'?e('p',null,'NIFTY 500 valid quotes: ',data.liquidity?.intraday_quoted??'—',' · Missing quotes: ',data.liquidity?.intraday_missing??'—'):null,
      data.liquidity?.error?e(Notice,{warning:true},data.liquidity.error):null,
      e('p',{className:'small muted'},'Liquidity = session volume × last price (turnover proxy). Price ≥ ₹20; session volume ≥ 1 lakh; turnover proxy ≥ ₹1 crore. Intraday selects only mapped NIFTY 500 equities. Top stocks by turnover are capped by INSIGHTS_MAX_SYMBOLS (strategy shortlist size, not constituent coverage). Swing strategies retain completed daily/weekly candle rules.')):null,
+    active==='Model Health'?e(ModelHealth,{data}):null,
     active==='Dashboard'?e(Dashboard,{data,onRefresh,refreshBusy,refreshState:health.manual_refresh,refreshError}):null,
     active==='Analyse'?e(Analyse,{data,onSearch,busy}):null,
     active==='Positional'?e(PositionalPanel):null,

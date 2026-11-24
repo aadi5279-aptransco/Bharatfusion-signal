@@ -22,7 +22,7 @@ def install(source, target):
         files+=sorted(p for p in (source/'patterns').rglob('*') if p.suffix in ('.py','.json','.md'))
     files.append(source/'tools'/'install_fii_holdings_update.py')
     files.append(source/'run_insights.py')
-    for name in ('PHASE0_CHECK.bat','PHASE0_DATA_CONTRACT.md','PHASE2_CHECK.bat','PHASE2_PATTERNS.md'):
+    for name in ('PHASE0_CHECK.bat','PHASE0_DATA_CONTRACT.md','PHASE2_CHECK.bat','PHASE2_PATTERNS.md','PHASE3_CHECK.bat','PHASE3_RESEARCH.md'):
         if (source/name).is_file():files.append(source/name)
     scheduler_test=source/'tests'/'test_staged_scheduler.py'
     if scheduler_test.is_file():files.append(scheduler_test)
