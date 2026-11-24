@@ -160,3 +160,6 @@
 .trend-bear{color:#eb3349}.trend-bull{color:#00a886}.trend-neutral{color:var(--muted)}.trend-caption{color:var(--muted);font-size:9px;letter-spacing:.08em;margin:6px 0 12px}.trend-meter .small{font-size:10px;margin:4px 0;overflow-wrap:anywhere}.trend-meter-empty .trend-meter-svg{opacity:.35}
 .trend-meter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin:16px 0}.trend-meter-summary{margin-bottom:16px}
 @media(max-width:520px){.trend-meter-grid{grid-template-columns:1fr}.trend-meter-svg{max-width:270px}}
+
+.pattern-inspector summary{cursor:pointer;font-weight:600}.pattern-controls{display:flex;gap:1rem;flex-wrap:wrap;align-items:center;margin:1rem 0}.pattern-controls input,.pattern-controls select{padding:.5rem;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}.pattern-inspector pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.pattern-inspector{min-height:0}.pattern-controls button{padding:.6rem 1rem;background:var(--panel2);color:var(--ink);border:1px solid var(--accent);border-radius:6px}.pattern-controls button:disabled{opacity:.6}

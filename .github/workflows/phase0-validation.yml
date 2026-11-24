@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'insights/**'
+      - 'patterns/**'
       - 'tests/**'
       - 'requirements*.txt'
       - '.github/workflows/phase0-validation.yml'
@@ -21,8 +22,11 @@ jobs:
       - name: Install application test dependencies
         run: python -m pip install -r requirements-insights.txt -r requirements-orderflow.txt
       - name: Compile data adapter
-        run: python -m compileall -q insights
+        run: python -m compileall -q insights patterns
+      - name: Deterministic pattern tests
+        run: python -m unittest discover -s patterns/tests -q
       - name: Insights regression suite
         run: python -m unittest discover -s insights/tests -q
       - name: Core regression suite
         run: python -m unittest discover -s tests -q
+

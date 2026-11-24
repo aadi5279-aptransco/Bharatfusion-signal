@@ -79,11 +79,8 @@ def daily_setups(frame,item,now,holidays):
     # Explicit common eligibility gate: liquidity, not a profitability claim.
     if price<20 or x.avgvol<100000 or x.avgvol*price<10000000:return [],f
     a,b,c=f.iloc[-3],f.iloc[-2],x
-    body=(f.close-f.open).abs();avgbody=body.iloc[-23:-3].mean()
-    down=f.close.iloc[-4]<f.close.iloc[-8] and a.close<f.sma20.iloc[-3]
-    morning=(a.close<a.open and a.open-a.close>=avgbody and abs(b.close-b.open)<=(a.open-a.close)*.3
-        and max(b.open,b.close)<=a.close+(a.open-a.close)*.25 and c.close>c.open
-        and c.close>=(a.open+a.close)/2 and c.close-c.open>=.5*(a.open-a.close) and down)
+    from patterns.legacy import positional_morning_star
+    morning=positional_morning_star(f)
     if morning:
         out.append(setup(item,'PDF Morning Star',stamp,price,b.low*.999,
             'Downtrend; large red body, small star body ≤30%, strong green close above first-body midpoint.',
