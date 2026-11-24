@@ -2,11 +2,11 @@
 
 def health():
     return {
-        'status': 'DATASET COLLECTION — NO APPROVED MODEL',
-        'stage': '3B', 'champion': None, 'challenger': None,
+        'status': 'DATASET READINESS — NO APPROVED MODEL',
+        'stage': '3C', 'champion': None, 'challenger': None,
         'orders_enabled': False, 'automatic_training': False,
         'fallback': 'Existing deterministic strategies remain unchanged',
-        'implemented': ['On-demand Dhan research snapshots with hashes and quarantine',
+        'implemented': ['Read-only snapshot coverage and provenance audit','On-demand Dhan research snapshots with hashes and quarantine',
                         'Offline logistic and candidate-selection diagnostic baselines',
                         'Next-bar ATR triple-barrier labels',
                         'Explicit dated fee schedules and liquidity slippage',

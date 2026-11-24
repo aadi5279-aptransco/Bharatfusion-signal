@@ -102,7 +102,12 @@ class DatasetStore:
         if not self.path.exists():return []
         with closing(sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True)) as db:
             ids=[r[0] for r in db.execute('SELECT digest FROM snapshots ORDER BY rowid DESC LIMIT 30')]
-        return [dict(self.read(d)['manifest'],dataset_id=d) for d in ids]
+        from insights.alpha.readiness import assess
+        result=[]
+        for d in ids:
+            payload=self.read(d)
+            result.append(dict(payload['manifest'],dataset_id=d,readiness=assess(payload)))
+        return result
 
 
 def capture(service,symbol,days,now,store=None):

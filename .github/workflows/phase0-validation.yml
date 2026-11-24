@@ -22,7 +22,7 @@ jobs:
       - name: Install application test dependencies
         run: python -m pip install -r requirements-insights.txt -r requirements-orderflow.txt
       - name: Windows SQLite cleanup and research regression
-        run: python -m unittest insights.tests.test_alpha_research insights.tests.test_alpha_datasets -v
+        run: python -m unittest insights.tests.test_alpha_research insights.tests.test_alpha_datasets insights.tests.test_alpha_readiness -v
   offline-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -42,3 +42,14 @@ jobs:
       - name: Core regression suite
         run: python -m unittest discover -s tests -q
 
+  frontend-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build interface
+        working-directory: web
+        run: npm ci && npm run build
