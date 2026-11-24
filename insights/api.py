@@ -191,6 +191,22 @@ def create_app(service=None):
         response.headers['Content-Security-Policy']="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'self'; object-src 'none'"
         return response
 
+    @app.post('/api/v1/market-insights/patterns/scan')
+    def patterns_scan():
+        from urllib.parse import urlsplit
+        from insights.pattern_engine import inspect
+        from insights.service import _holiday_set
+        if (request.remote_addr not in ('127.0.0.1','::1') or
+            urlsplit(request.host_url).hostname not in ('localhost','127.0.0.1','::1') or
+            request.headers.get('Origin',request.host_url.rstrip('/'))!=request.host_url.rstrip('/')):
+            return jsonify(error='Local same-origin requests only'),403
+        body=request.get_json(silent=True)
+        if not isinstance(body,dict) or set(body)!={'symbol','timeframe'}:
+            return jsonify(error='Provide symbol and timeframe'),400
+        try:return jsonify(inspect(service,body['symbol'],body['timeframe'],datetime.now(IST),_holiday_set()))
+        except ValueError as exc:return jsonify(error=str(exc)),400
+        except Exception:return jsonify(error='Pattern source unavailable; no entry inferred'),503
+
     @app.get('/api/v1/health')
     def health():return jsonify(service.health())
 
