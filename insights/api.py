@@ -14,6 +14,10 @@ def create_app(service=None):
     app.config.update(MAX_CONTENT_LENGTH=2_100_000,JSON_SORT_KEYS=False)
     service=service or InsightsService()
     app.extensions['insights_service']=service
+    @app.get('/api/v1/market-insights/model-health')
+    def model_health():
+        from insights.alpha import health
+        return jsonify(health())
     from insights.app_controls import register
     register(app)
     @app.before_request
