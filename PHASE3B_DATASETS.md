@@ -1,3 +1,33 @@
+# Phase 3C — snapshot readiness audit
+
+This update adds a read-only coverage report to every saved snapshot in Model Health.
+Existing snapshot hashes and stored content are not rewritten. No model training,
+promotion or live signal changes are enabled.
+
+The report checks the snapshot's capture-time requested range against a hypothetical
+regular weekday 09:15–15:30 five-minute grid. It exposes opening, interior and closing
+gaps in observed sessions. For example, a complete day ending at a 15:10 candle
+start leaves three regular-grid bars absent: 15:15, 15:20 and 15:25.
+
+Whole weekdays without rows are CALENDAR_UNVERIFIED, not automatically declared
+missing trading sessions: holidays/special sessions require separate evidence.
+A complete grid still returns PROVENANCE_REVIEW and training_ready=false.
+This does not repair truncated broker history or certify adjusted data.
+
+Install using the existing source updater from a separately extracted ZIP, run
+PHASE3_CHECK.bat, then run npm run build inside web and restart. Existing backups
+may be retained; the updater backs up replaced source files. There is no database
+migration in this update. The code was prepared through GitHub because the local
+execution workspace was unavailable; use the PR's Windows, Linux and frontend
+CI results as the automated verification evidence.
+
+After installation, refresh Model Health, expand a snapshot under
+"Snapshot readiness — review before training", and inspect its session rows.
+Existing snapshots are audited automatically without downloading history again.
+Newly saved snapshots acquire the audit at the next Model Health refresh.
+If COVERAGE_REVIEW appears, review the dates and source history before training.
+The original Phase 3B installation and storage guidance follows.
+
 # Phase 3B — research snapshots and baseline evaluation primitives
 
 Builds on Phase 3A commit `1819550c6d59532b9c76b035d7c5114dd8f75495`.

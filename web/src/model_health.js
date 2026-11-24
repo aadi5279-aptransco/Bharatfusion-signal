@@ -17,7 +17,7 @@ export default function ModelHealth({data={}}){
   }catch(ex){if(live.current)setMessage(ex.message);}finally{if(live.current)setBusy(false);}
  };
  return e('section',{className:'panel',style:{padding:24}},
-  e('h2',null,'Phase 3B · Model Health'),
+  e('h2',null,'Phase 3C · Model Health'),
   e('p',null,data.status||'Waiting for model health status…'),
   e('p',null,'No approved AI probabilities or performance statistics are available. Existing strategy signals are not AI-validated.'),
   e('p',null,'Champion: ',data.champion||'None',' · Automatic training: ',data.automatic_training?'Enabled':'Disabled'),
@@ -35,6 +35,18 @@ export default function ModelHealth({data={}}){
     e('td',null,d.instrument?.symbol),e('td',null,d.valid_rows),e('td',null,d.quarantined_rows),
     e('td',null,d.last?new Date(d.last).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}):'—'),e('td',null,d.status)))))):
     e('p',null,'No saved snapshots yet. A snapshot is created only when you request one.'),
+  e('h3',null,'Snapshot readiness — review before training'),
+  datasets.map(d=>e('details',{key:d.dataset_id,style:{marginBottom:12}},
+   e('summary',null,(d.instrument?.symbol||'Snapshot')+' · '+(d.readiness?.status||'Audit available on next refresh')),
+   d.readiness?e('div',null,
+    e('p',null,d.readiness.scope),
+    e('p',null,'Missing bars in observed sessions: ',d.readiness.missing_in_observed_sessions,' · Training approved: No'),
+    e('ul',null,d.readiness.reasons.map((x,i)=>e('li',{key:i},x))),
+    e('div',{style:{overflowX:'auto'}},e('table',null,
+     e('thead',null,e('tr',null,...['Session','Expected regular bars','Present','Missing','Classification'].map(x=>e('th',{key:x},x)))),
+     e('tbody',null,d.readiness.sessions.map(s=>e('tr',{key:s.date},
+      e('td',null,s.date),e('td',null,s.expected_regular_bars),e('td',null,s.present),
+      e('td',null,s.missing_regular_bars),e('td',null,s.classification))))))):null)),
   ['implemented','blocked_by','pending'].map(key=>e('div',{key},
    e('h3',null,{implemented:'Research foundation',blocked_by:'Data acceptance required',pending:'Remaining development'}[key]),
    e('ul',null,(data[key]||[]).map(x=>e('li',{key:x},x))))),
