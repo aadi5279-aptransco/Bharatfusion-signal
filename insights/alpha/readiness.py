@@ -5,6 +5,7 @@ No result from this module approves training or changes the saved snapshot.
 """
 from datetime import datetime, timedelta
 from insights.config import IST
+from insights.alpha.calendar import published_holiday, SOURCE
 
 def timestamp(value):
     t = datetime.fromisoformat(value)
@@ -25,7 +26,15 @@ def assess(payload):
     sessions = []
     day = start.replace(hour=0, minute=0, second=0, microsecond=0)
     while day.date() <= end.date():
-        if day.weekday() < 5:
+        if published_holiday(manifest.get('instrument', {}), day.date()):
+            count = sum(t.date() == day.date() for t in actual)
+            sessions.append({'date': day.date().isoformat(), 'expected_regular_bars': 0,
+                             'present': count, 'missing_regular_bars': 0,
+                             'first_missing': None, 'last_missing': None,
+                             'missing_before_first': None, 'missing_after_last': None,
+                             'classification': 'HOLIDAY_DATA_CONFLICT' if count else 'VERIFIED_HOLIDAY',
+                             'calendar_source': SOURCE})
+        elif day.weekday() < 5:
             opening = day.replace(hour=9, minute=15)
             grid = [opening + timedelta(minutes=5*i) for i in range(75)]
             expected = [t for t in grid if t >= start and t+timedelta(minutes=5) <= end]
@@ -45,8 +54,12 @@ def assess(payload):
                 })
         day += timedelta(days=1)
     known_gaps = sum(s['missing_regular_bars'] for s in sessions if s['present'])
-    unobserved = [s['date'] for s in sessions if not s['present']]
+    unobserved = [s['date'] for s in sessions if not s['present'] and s['classification'] != 'VERIFIED_HOLIDAY']
+    holiday_conflict = any(s['classification'] == 'HOLIDAY_DATA_CONFLICT' for s in sessions)
+    repair_conflict = bool(manifest.get('repair', {}).get('conflicts', 0) or manifest.get('repair', {}).get('prior_conflicts', 0))
     reasons = list(manifest.get('blockers', []))
+    if holiday_conflict: reasons.append('Rows present on a published NSE equity holiday')
+    if repair_conflict: reasons.append('Fresh source disagrees with saved or alternate-interval candles; inspect repair report')
     if known_gaps:
         reasons.append(f'{known_gaps} regular-grid candles absent within observed sessions')
     if unobserved:
@@ -55,10 +68,10 @@ def assess(payload):
         reasons.append('Quarantined rows need review')
     reasons.append('Calendar and point-in-time provenance must be independently verified')
     return {
-        'version': 'readiness-v1', 'status': 'COVERAGE_REVIEW' if known_gaps or unobserved or payload.get('quarantine') else 'PROVENANCE_REVIEW',
+        'version': 'readiness-v1', 'status': 'COVERAGE_REVIEW' if known_gaps or unobserved or holiday_conflict or repair_conflict or payload.get('quarantine') else 'PROVENANCE_REVIEW',
         'training_ready': False, 'evaluated_as_of': end.isoformat(),
         'missing_in_observed_sessions': known_gaps,
         'weekdays_without_rows': unobserved, 'sessions': sessions,
         'reasons': list(dict.fromkeys(reasons)),
-        'scope': 'Regular weekday grid only; absent weekdays may be holidays. Audit is as of snapshot capture, not current time.',
+        'scope': 'Published NSE equity 2026 closures are excluded. Other calendars and special sessions remain unverified. Audit is as of snapshot capture, not current time.',
     }

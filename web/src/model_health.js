@@ -16,8 +16,19 @@ export default function ModelHealth({data={}}){
    setDatasets(old=>[d,...old.filter(x=>x.dataset_id!==d.dataset_id)].slice(0,30));
   }catch(ex){if(live.current)setMessage(ex.message);}finally{if(live.current)setBusy(false);}
  };
+ const repairSnapshot=async id=>{
+  if(busy)return;setBusy(true);setMessage('Comparing fresh 5-minute and 1-minute history. This may take several minutes; do not submit again.');
+  try{
+   const r=await fetch('/api/v1/market-insights/research/repair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset_id:id})});
+   const d=await r.json();if(!r.ok)throw Error(d.error||'Repair request failed');
+   if(!live.current)return;
+   if(!d.dataset_id){setMessage(d.message||d.status);return;}
+   setDatasets(old=>[d,...old.filter(x=>x.dataset_id!==d.dataset_id)].slice(0,30));
+   setMessage('Repair comparison saved: '+d.repair.added_rows+' rows recovered; '+d.repair.remaining_regular_grid_gaps+' regular-grid gaps remain; '+d.repair.conflicts+' conflicts. Original snapshot retained. Training remains blocked.');
+  }catch(ex){if(live.current)setMessage(ex.message);}finally{if(live.current)setBusy(false);}
+ };
  return e('section',{className:'panel',style:{padding:24}},
-  e('h2',null,'Phase 3C · Model Health'),
+  e('h2',null,'Phase 3D · Model Health'),
   e('p',null,data.status||'Waiting for model health status…'),
   e('p',null,'No approved AI probabilities or performance statistics are available. Existing strategy signals are not AI-validated.'),
   e('p',null,'Champion: ',data.champion||'None',' · Automatic training: ',data.automatic_training?'Enabled':'Disabled'),
@@ -40,6 +51,12 @@ export default function ModelHealth({data={}}){
    e('summary',null,(d.instrument?.symbol||'Snapshot')+' · '+(d.readiness?.status||'Audit available on next refresh')),
    d.readiness?e('div',null,
     e('p',null,d.readiness.scope),
+    e('button',{type:'button',disabled:busy||d.instrument?.segment!=='NSE_EQ',onClick:()=>repairSnapshot(d.dataset_id)},'Verify and repair from Dhan'),
+    e('p',null,'Checks up to five affected sessions per request; saves a new version. No invented candles or automatic training.'),
+    d.repair?e('div',null,
+     e('p',null,'Repair result: ',d.repair.outcome,' · Recovered: ',d.repair.added_rows,' · Remaining gaps: ',d.repair.remaining_regular_grid_gaps,' · Conflicts: ',d.repair.conflicts,' · Deferred sessions: ',d.repair.sessions_deferred),
+     e('p',{className:'small'},'Parent snapshot: ',d.repair.parent_dataset_id),
+     e('ul',null,d.repair.sessions.map(s=>e('li',{key:s.date},s.date+' · added '+s.added+' · conflicts '+s.conflicts+' · '+s.requests.map(r=>r.interval+'m: '+r.status+(r.usable_rows!=null?' ('+r.usable_rows+' usable)':'')).join('; '))))):null,
     e('p',null,'Missing bars in observed sessions: ',d.readiness.missing_in_observed_sessions,' · Training approved: No'),
     e('ul',null,d.readiness.reasons.map((x,i)=>e('li',{key:i},x))),
     e('div',{style:{overflowX:'auto'}},e('table',null,
