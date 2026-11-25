@@ -38,6 +38,20 @@ def create_app(service=None):
         try:return jsonify(capture(service,body['symbol'],body['days'],datetime.now(IST)))
         except ValueError as exc:return jsonify(error=str(exc)[:160]),400
         except Exception:return jsonify(error='Snapshot failed; check Dhan data access and local storage. No dataset was certified.'),503
+    @app.post('/api/v1/market-insights/research/repair')
+    def research_repair():
+        from insights.alpha.repair import repair
+        from urllib.parse import urlsplit
+        if (request.remote_addr not in ('127.0.0.1','::1') or
+            urlsplit(request.host_url).hostname not in ('127.0.0.1','localhost','::1') or
+            request.headers.get('Origin',request.host_url.rstrip('/'))!=request.host_url.rstrip('/')):
+            return jsonify(error='Local same-origin requests only'),403
+        body=request.get_json(silent=True)
+        if not isinstance(body,dict) or set(body)!={'dataset_id'}:
+            return jsonify(error='Provide dataset_id'),400
+        try:return jsonify(repair(service,body['dataset_id'],datetime.now(IST)))
+        except ValueError:return jsonify(error='Invalid or unsupported snapshot; no repair performed'),400
+        except Exception:return jsonify(error='Repair failed; check local data access and storage. No training approval granted.'),503
     from insights.app_controls import register
     register(app)
     @app.before_request
